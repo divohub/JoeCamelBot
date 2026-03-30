@@ -1,0 +1,5 @@
+aiogram
+google-generativeai
+apscheduler
+aiosqlite
+python-dotenv

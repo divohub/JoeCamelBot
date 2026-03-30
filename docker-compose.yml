@@ -1,0 +1,14 @@
+services:
+  shnyaga-bot:
+    build: .
+    container_name: shnyaga-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DB_PATH=/app/data/shnyaga.db
+
+volumes:
+  data:

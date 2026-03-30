@@ -1,0 +1,127 @@
+import aiosqlite
+import datetime
+
+import os
+
+DB_PATH = os.getenv("DB_PATH", "data/shnyaga.db")
+
+async def init_db():
+    # Ensure directory exists
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+        
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                full_name TEXT,
+                score INTEGER DEFAULT 0,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS activities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                description TEXT,
+                points INTEGER,
+                category TEXT,
+                is_mega BOOLEAN DEFAULT 0,
+                is_approved BOOLEAN DEFAULT 0,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS votes (
+                activity_id INTEGER,
+                voter_id INTEGER,
+                PRIMARY KEY (activity_id, voter_id),
+                FOREIGN KEY (activity_id) REFERENCES activities (id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        await db.commit()
+
+async def get_user(user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def update_user(user_id, username, full_name):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO users (user_id, username, full_name) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, "
+            "full_name = excluded.full_name, last_seen = CURRENT_TIMESTAMP",
+            (user_id, username, full_name)
+        )
+        await db.commit()
+
+async def update_score(user_id, points):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET score = score + ? WHERE user_id = ?", (points, user_id))
+        await db.commit()
+
+async def add_activity(user_id, description, points, category, is_mega=False, is_approved=True):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO activities (user_id, description, points, category, is_mega, is_approved) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, description, points, category, int(is_mega), int(is_approved))
+        )
+        activity_id = cursor.lastrowid
+        await db.commit()
+        return activity_id
+
+async def apply_daily_penalty():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET score = score - 10")
+        await db.commit()
+
+async def get_top_users(limit=10):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users ORDER BY score DESC LIMIT ?", (limit,)) as cursor:
+            return await cursor.fetchall()
+
+async def add_vote(activity_id, voter_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute("INSERT INTO votes (activity_id, voter_id) VALUES (?, ?)", (activity_id, voter_id))
+            await db.commit()
+            async with db.execute("SELECT COUNT(*) FROM votes WHERE activity_id = ?", (activity_id,)) as cursor:
+                count = (await cursor.fetchone())[0]
+                return count
+        except aiosqlite.IntegrityError:
+            return -1
+
+async def approve_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            activity = await cursor.fetchone()
+            if activity and not activity['is_approved']:
+                await db.execute("UPDATE activities SET is_approved = 1 WHERE id = ?", (activity_id,))
+                await db.execute("UPDATE users SET score = score + ? WHERE user_id = ?", (activity['points'], activity['user_id']))
+                await db.commit()
+                return activity
+    return None
+
+async def get_setting(key, default=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else default
+
+async def set_setting(key, value):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+        await db.commit()
