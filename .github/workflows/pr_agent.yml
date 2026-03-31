@@ -1,8 +1,8 @@
-name: PR Agent (Gemini)
+name: PR Agent
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronized]
+    types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
@@ -19,11 +19,18 @@ jobs:
       - name: PR Agent action
         uses: Codium-ai/pr-agent@main
         env:
-          # Сообщаем агенту, что используем Gemini
-          CONFIG.MODEL_RESOURCES__DEFAULT_MODEL: "gemini/gemini-3.0-pro-preview"
-          # Передаем ключ
+          # ПРАВИЛЬНОЕ ИМЯ МОДЕЛИ (используем 1.5 Pro или Flash)
+          CONFIG.MODEL_RESOURCES__DEFAULT_MODEL: "gemini/gemini-3.1-pro-preview"
+          # Ключ Gemini
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Дополнительные настройки для удобства
+          
+          # Указываем явно, что мы НЕ используем OpenAI
+          CONFIG.MODEL_RESOURCES__FALLBACK_MODELS: "['gemini/gemini-1.5-flash']"
+          
+          # Настройки вывода
           PR_DESCRIPTION.PUBLISH_DESCRIPTION_AS_COMMENT: "true"
           PR_REVIEW.REQUIRE_SCORE_REVIEW: "false"
+          
+          # Дополнительная инструкция, чтобы он не искал OpenAI
+          CONFIG.CUSTOMLABELS_SOURCE: "none"
