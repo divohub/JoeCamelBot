@@ -160,7 +160,20 @@ async def handle_all_messages(message: types.Message):
         CHAT_HISTORY[chat_id] = []
     
     history = CHAT_HISTORY[chat_id]
-    history.append({"id": user_id, "name": full_name, "text": message.text, "timestamp": datetime.now()})
+    
+    # Store reply context
+    reply_to_user = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        reply_to_user = message.reply_to_message.from_user.full_name
+
+    history.append({
+        "message_id": message.message_id,
+        "id": user_id, 
+        "name": full_name, 
+        "text": message.text, 
+        "timestamp": datetime.now(),
+        "reply_to": reply_to_user
+    })
     if len(history) > MAX_HISTORY:
         history.pop(0)
 
@@ -181,7 +194,8 @@ async def handle_all_messages(message: types.Message):
         user_memory=user_memory,
         context_history=history[:-1], 
         is_direct=is_direct,
-        user_stats=user_stats_str
+        user_stats=user_stats_str,
+        reply_to_user=reply_to_user
     )
     
     update_memory = ai_result.get('update_memory')
@@ -193,6 +207,14 @@ async def handle_all_messages(message: types.Message):
     category = ai_result.get('category', 'Диалог')
     comment = ai_result.get('comment', '')
     is_mega = ai_result.get('is_mega', False) or category == 'Мега'
+    reply_to_idx = ai_result.get('reply_to_idx')
+
+    reply_args = {}
+    if reply_to_idx is not None and isinstance(reply_to_idx, int):
+        ctx_history = history[:-1]
+        if 0 <= reply_to_idx < len(ctx_history):
+            reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
+
 
     if action == 'ignore':
         if is_direct:
@@ -215,12 +237,14 @@ async def handle_all_messages(message: types.Message):
             activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=True, is_approved=False)
             builder = InlineKeyboardBuilder()
             builder.button(text=f"✅ База (0/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
-            await message.reply(
-                f"🔥 {html.bold('ИСТИННАЯ СИЛА ОБНАРУЖЕНА!')} 🔥\n\n{mention} утверждает: {html.italic(html.quote(message.text))}\n\n"
-                f"Вердикт бота: {html.italic(html.quote(comment))}\n\n"
-                f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!",
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"🔥 {html.bold('ИСТИННАЯ СИЛА ОБНАРУЖЕНА!')} 🔥\n\n{mention} утверждает: {html.italic(html.quote(message.text))}\n\n"
+                     f"Вердикт бота: {html.italic(html.quote(comment))}\n\n"
+                     f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!",
                 reply_markup=builder.as_markup(),
-                parse_mode="HTML"
+                parse_mode="HTML",
+                **reply_args if reply_args else {"reply_to_message_id": message.message_id}
             )
         else:
             activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
@@ -229,10 +253,12 @@ async def handle_all_messages(message: types.Message):
             builder = InlineKeyboardBuilder()
             builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
             
-            await message.reply(
-                f"💎 {html.bold(f'база пополнена на {points} баллов!')}\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"💎 {html.bold(f'база пополнена на {points} баллов!')}\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
                 reply_markup=builder.as_markup(),
-                parse_mode="HTML"
+                parse_mode="HTML",
+                **reply_args if reply_args else {"reply_to_message_id": message.message_id}
             )
     elif action == 'remove_points':
         activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
@@ -241,13 +267,19 @@ async def handle_all_messages(message: types.Message):
         builder = InlineKeyboardBuilder()
         builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
         
-        await message.reply(
-            f"💀 {html.bold(f'штраф {points} баллов силы!')}\n\n{html.italic(html.quote(comment))}",
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"💀 {html.bold(f'штраф {points} баллов силы!')}\n\n{html.italic(html.quote(comment))}",
             reply_markup=builder.as_markup(),
-            parse_mode="HTML"
+            parse_mode="HTML",
+            **reply_args if reply_args else {"reply_to_message_id": message.message_id}
         )
     elif action == 'chat':
-        await message.reply(comment)
+        await bot.send_message(
+            chat_id=chat_id,
+            text=comment,
+            **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+        )
 
 @dp.callback_query(F.data.startswith("vote_"))
 async def handle_vote(callback: CallbackQuery):
