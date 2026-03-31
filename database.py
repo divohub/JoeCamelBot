@@ -48,6 +48,14 @@ async def init_db():
                 value TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_memories (
+                user_id INTEGER PRIMARY KEY,
+                memory_text TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        """)
         await db.commit()
 
 async def get_user(user_id):
@@ -124,4 +132,19 @@ async def get_setting(key, default=None):
 async def set_setting(key, value):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+        await db.commit()
+
+async def get_user_memory(user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT memory_text FROM user_memories WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def update_user_memory(user_id, memory_text):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO user_memories (user_id, memory_text, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(user_id) DO UPDATE SET memory_text = excluded.memory_text, updated_at = CURRENT_TIMESTAMP",
+            (user_id, memory_text)
+        )
         await db.commit()
