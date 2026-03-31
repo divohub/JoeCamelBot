@@ -1,4 +1,4 @@
-name: PR Agent (Gemini 3 Pro)
+name: PR Agent
 
 on:
   pull_request:
@@ -14,28 +14,14 @@ jobs:
       issues: write
       pull-requests: write
       contents: read
-    name: Run pr-agent
     steps:
       - name: PR Agent action
         uses: Codium-ai/pr-agent@main
         env:
-          
-          CONFIG.MODEL_RESOURCES__DEFAULT_MODEL: "gemini/gemini-3-pro-preview"
+          CONFIG.MODEL: "gemini/gemini-3-pro-preview"
+          CONFIG.FALLBACK_MODELS: "['gemini/gemini-1.5-pro']"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-         
           LITELLM_PARAMS: "reasoning_effort=high,temperature=1.0"
-
-         
-
-          
-          CONFIG.MODEL_RESOURCES__FALLBACK_MODELS: "['gemini/gemini-1.5-pro']"
-          
-        
-          CONFIG.MODEL_RESOURCES__MODEL_PROVIDER: "google"
-
-         
           PR_DESCRIPTION.PUBLISH_DESCRIPTION_AS_COMMENT: "true"
           PR_REVIEW.REQUIRE_SCORE_REVIEW: "false"
-          PR_CODE_SUGGESTIONS.NUM_CODE_SUGGESTIONS: 3
