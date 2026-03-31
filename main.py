@@ -44,9 +44,11 @@ MAX_HISTORY = 15
 
 # Helper to format message with user mention
 def get_user_mention(user):
-    if user['username']:
-        return f"@{user['username']}"
-    return user['full_name']
+    username = user['username'] if 'username' in user.keys() else None
+    if username:
+        return f"@{html.quote(username)}"
+    full_name = user['full_name'] if 'full_name' in user.keys() else 'Неизвестный'
+    return html.quote(full_name)
 
 # Filter to check if the bot is mentioned or replied to
 async def is_direct_to_bot(message: types.Message):
