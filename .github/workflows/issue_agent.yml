@@ -1,0 +1,56 @@
+name: Issue AI Assistant
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  analyze_issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Gemini Issue Reviewer
+        uses: google-github-actions/setup-gcloud@v2 # Используем официальный инструмент от Google
+        
+      - name: Process Issue with Gemini
+        id: gemini
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          # Формируем запрос к API Gemini
+          # Мы просим его проанализировать задачу и вернуть структурированный текст
+          PROMPT="Analyze the following GitHub Issue. If it's messy, rewrite it to be clear using Markdown. Add a 'Summary' and 'Action Items' section. 
+          Title: $ISSUE_TITLE
+          Body: $ISSUE_BODY"
+          
+          # Отправляем запрос (упрощенный пример через curl)
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash-preview:generateContent?key=$GEMINI_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"contents\": [{\"parts\":[{\"text\": \"$PROMPT\"}]}]
+            }")
+          
+          # Извлекаем текст ответа (нужен jq, он есть в раннерах GitHub)
+          AI_SUGGESTION=$(echo $RESPONSE | jq -r '.candidates[0].content.parts[0].text')
+          
+          # Сохраняем результат для следующего шага
+          echo "suggestion<<EOF" >> $GITHUB_OUTPUT
+          echo "$AI_SUGGESTION" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update Issue with AI Suggestion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SUGGESTION: ${{ steps.gemini.outputs.suggestion }}
+        run: |
+          # Добавляем комментарий от ИИ или редактируем саму задачу
+          gh issue comment $ISSUE_NUMBER --body "### 🤖 AI Analysis & Suggestions
+          $SUGGESTION"
+          
+          # Если хотите, чтобы он вешал теги (например, 'bug' или 'feature'), можно добавить:
+          # gh issue edit $ISSUE_NUMBER --add-label "reviewed-by-ai"
