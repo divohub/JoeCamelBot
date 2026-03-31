@@ -165,13 +165,20 @@ async def handle_all_messages(message: types.Message):
     
     user_memory = await database.get_user_memory(user_id)
     
+    user = await database.get_user(user_id)
+    user_stats_str = f"Счет: {user['score']}" if user else ""
+    activities = await database.get_user_activities(user_id, limit=3)
+    if activities:
+        user_stats_str += ", последние дела: " + ", ".join([a['description'][:15] for a in activities])
+    
     # Proactive AI check for EVERY message (Lite model makes it cheap)
     ai_result = await scorer.analyze_message(
         message.text, 
         full_name, 
         user_memory=user_memory,
         context_history=history[:-1], 
-        is_direct=is_direct
+        is_direct=is_direct,
+        user_stats=user_stats_str
     )
     
     update_memory = ai_result.get('update_memory')
@@ -206,7 +213,7 @@ async def handle_all_messages(message: types.Message):
             await database.update_score(user_id, points)
             
             builder = InlineKeyboardBuilder()
-            builder.button(text=f"⚖️ Опротестовать (0/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
+            builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
             
             await message.reply(
                 f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
@@ -218,7 +225,7 @@ async def handle_all_messages(message: types.Message):
         await database.update_score(user_id, -points)
         
         builder = InlineKeyboardBuilder()
-        builder.button(text=f"⚖️ Опротестовать (0/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
+        builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
         
         await message.reply(
             f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
@@ -252,39 +259,67 @@ async def handle_vote(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
         await callback.answer("Голос принят.")
 
-@dp.callback_query(F.data.startswith("veto_"))
-async def handle_veto(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("dispute_"))
+async def handle_dispute(callback: CallbackQuery):
     activity_id = int(callback.data.split("_")[1])
-    voter_id = callback.from_user.id
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
     
-    activity = await database.get_activity(activity_id)
-    if not activity:
-        await callback.answer("Деяние уже стерто из истории.", show_alert=True)
+    dispute = await database.get_dispute_by_activity(activity_id)
+    member_count = await bot.get_chat_member_count(chat_id)
+    required_to_launch = ((member_count - 1) // 2) + 1
+    
+    if not dispute:
+        dispute_id = await database.create_dispute(activity_id, chat_id, callback.message.message_id, required_to_launch)
+    else:
+        dispute_id = dispute['id']
+        
+    signatures_count = await database.add_dispute_signature(dispute_id, user_id)
+    
+    if signatures_count == -1:
+        await callback.answer("Ты уже подписался на диспут.", show_alert=True)
         return
         
-    if voter_id == activity['user_id']:
-        await callback.answer("Ты не можешь опротестовать свой собственный вердикт, это не по-пацански.", show_alert=True)
-        return
-        
-    votes_count = await database.add_vote(activity_id, voter_id)
-    
-    if votes_count == -1:
-        await callback.answer("Твоя воля уже учтена.", show_alert=True)
-        return
-    
-    if votes_count >= MIN_VOTES:
-        deleted_activity = await database.delete_activity(activity_id)
-        if deleted_activity:
-            await callback.message.edit_text(
-                f"⚖️ **ВЕРДИКТ БОТА ОПРОВЕРГНУТ!**\n\nПацаны решили, что это не база. История скорректирована.",
-                parse_mode="Markdown"
-            )
-            await callback.answer("Справедливость восстановлена.")
+    if signatures_count >= required_to_launch:
+        poll_msg = await bot.send_poll(
+            chat_id=chat_id,
+            question=f"Опровергнуть вердикт бота по делу #{activity_id}?",
+            options=["Отменить решение", "Оставить как есть"],
+            is_anonymous=False
+        )
+        await database.update_dispute_poll(dispute_id, poll_msg.poll.id)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("Диспут запущен! Голосуйте в опросе.")
     else:
         builder = InlineKeyboardBuilder()
-        builder.button(text=f"⚖️ Опротестовать ({votes_count}/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
+        builder.button(text=f"⚖️ Сбор на диспут ({signatures_count}/{required_to_launch})", callback_data=f"dispute_{activity_id}")
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-        await callback.answer("Твой голос против системы принят.")
+        await callback.answer("Подпись принята.")
+
+@dp.poll()
+async def handle_poll(poll: types.Poll):
+    dispute = await database.get_dispute_by_poll_id(poll.id)
+    if not dispute:
+        return
+        
+    if dispute['status'] != 'polling':
+        return
+        
+    cancel_votes = poll.options[0].voter_count
+    keep_votes = poll.options[1].voter_count
+    
+    if keep_votes > 0:
+        await database.set_dispute_status(dispute['id'], 'rejected')
+        await bot.send_message(dispute['chat_id'], f"⚖️ Диспут по делу #{dispute['activity_id']} провален! Вердикт остается в силе.")
+        return
+        
+    member_count = await bot.get_chat_member_count(dispute['chat_id'])
+    required_to_win = member_count - 1
+    
+    if cancel_votes >= required_to_win:
+        await database.set_dispute_status(dispute['id'], 'resolved')
+        await database.delete_activity(dispute['activity_id'])
+        await bot.send_message(dispute['chat_id'], f"⚖️ Диспут по делу #{dispute['activity_id']} выигран! Вердикт отменен, баллы возвращены.")
 
 # Daily Penalty Task
 async def daily_penalty():
