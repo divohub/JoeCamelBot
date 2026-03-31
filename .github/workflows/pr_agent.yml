@@ -20,7 +20,7 @@ jobs:
         uses: Codium-ai/pr-agent@main
         env:
           # Сообщаем агенту, что используем Gemini
-          CONFIG.MODEL_RESOURCES__DEFAULT_MODEL: "gemini/gemini-1.5-pro"
+          CONFIG.MODEL_RESOURCES__DEFAULT_MODEL: "gemini/gemini-3.0-pro-preview"
           # Передаем ключ
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
