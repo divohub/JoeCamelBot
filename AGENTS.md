@@ -70,8 +70,12 @@ Currently, the project does not have a formal test suite or linter configuration
 ## 🧠 Feature Branching & Code Review Policy
 To maintain code quality and prevent bugs, we adhere to the following workflow:
 
-1.  **Branching**: Every new feature, bug fix, or major refactor MUST be done in its own branch.
+1.  **Worktrees & Branching**: Every new feature, bug fix, or major refactor MUST be done in its own branch and, ideally, in a separate **git worktree**. This allows for parallel development and prevents uncommitted changes from interfering with different tasks.
     - Branch naming convention: `feature/<feature-name>` (e.g., `feature/ai-memory-audit`) or `fix/<bug-name>`.
+    - **Agent Workflow**: 
+        1. Always create a new branch for each task.
+        2. Use `git worktree add ../worktree-name branch-name` to work in a separate directory if multiple tasks are active.
+        3. Never work directly in the `main` branch.
 2.  **Code Review**: 
     - **NEVER** commit or merge directly into `main`.
     - Always create a Pull Request (PR) for any new code using the GitHub CLI (`gh`).
