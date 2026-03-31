@@ -123,11 +123,17 @@ async def get_top_users(limit=10):
         async with db.execute("SELECT * FROM users ORDER BY score DESC LIMIT ?", (limit,)) as cursor:
             return await cursor.fetchall()
 
-async def get_user_activities(user_id, limit=5):
+async def get_user_activities(user_id, limit=5, offset=0):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM activities WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit)) as cursor:
+        async with db.execute("SELECT * FROM activities WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?", (user_id, limit, offset)) as cursor:
             return await cursor.fetchall()
+
+async def get_user_activities_count(user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM activities WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
 
 async def get_activity(activity_id):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -200,26 +206,6 @@ async def update_user_memory(user_id, memory_text):
         )
         await db.commit()
 
-
-async def get_activity(activity_id):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
-            return await cursor.fetchone()
-
-async def delete_activity(activity_id):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
-            activity = await cursor.fetchone()
-            if activity:
-                if activity['is_approved']:
-                    await db.execute("UPDATE users SET score = score - ? WHERE user_id = ?", (activity['points'], activity['user_id']))
-                await db.execute("DELETE FROM votes WHERE activity_id = ?", (activity_id,))
-                await db.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
-                await db.commit()
-                return activity
-    return None
 
 async def create_dispute(activity_id, chat_id, message_id, target_votes):
     async with aiosqlite.connect(DB_PATH) as db:
