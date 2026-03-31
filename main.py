@@ -86,18 +86,22 @@ async def cmd_start(message: types.Message):
     await database.update_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await message.answer("Приветствую. Я Шняга-Бот, арбитр этого чата. \n\n"
                          "Моя миссия — следить за вашим духом и телом. За истинную СИЛУ и БАЗУ — поощряю. За АНТИ и БЛАЖЬ — караю баллом и словом. \n\n"
-                         "**Законы этого места:**\n"
-                         "💎 Мини — 5 баллов (Рогалик)\n"
-                         "💎 Средняя — 10 баллов (База)\n"
-                         "💎 Большая — 15 баллов (Сила)\n"
-                         "💎 Экстра — 20 баллов (Истинная Сила)\n"
-                         "🔥 Мега — 150 баллов (Сила легенд, требует одобения пацанов)\n"
-                         "💀 Анти/Блажь — штраф от 5 до 20 баллов\n"
-                         "⚠️ Каждую полночь: -10 баллов каждому за простой.\n\n"
                          "Команды:\n"
+                         "/help — Узнать все возможности\n"
                          "/top — Список достойных\n"
                          "/stats — Состояние твоего духа\n"
                          "/setchat — Привязать штрафы к этому чату", parse_mode="Markdown")
+
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer("Я — Шняга-Бот, арбитр этого чата. Мои законы:\n\n"
+                         "💎 Мини (5), Средняя (10), Большая (15), Экстра (20), Мега (150)\n"
+                         "💀 Анти/Блажь — караются\n\n"
+                         "Команды:\n"
+                         "/top — Список лучших\n"
+                         "/stats — Твой профиль и последние деяния\n"
+                         "/setchat — Настройка чата\n\n"
+                         "Спрашивай с меня, если не согласен с вердиктом!", parse_mode="Markdown")
 
 @dp.message(Command("top"))
 async def cmd_top(message: types.Message):
@@ -117,7 +121,18 @@ async def cmd_stats(message: types.Message):
     if not user:
         await message.answer("Твои следы еще не впечатаны в нашу базу. Напиши /start")
         return
-    await message.answer(f"📊 **Твоя база:**\nБаланс силы: **{user['score']}**.\nСтремись к большему.", parse_mode="Markdown")
+    
+    activities = await database.get_user_activities(message.from_user.id, limit=3)
+    
+    msg = f"📊 **Твоя база:**\nБаланс силы: **{user['score']}**.\n\n"
+    if activities:
+        msg += "Последние деяния:\n"
+        for act in activities:
+            sign = "+" if act['points'] >= 0 else ""
+            comment_snippet = act['description'][:20] + "..." if len(act['description']) > 20 else act['description']
+            msg += f"• {act['category'].capitalize()}: {sign}{act['points']} — {comment_snippet}\n"
+    
+    await message.answer(msg, parse_mode="Markdown")
 
 @dp.message(Command("setchat"))
 async def cmd_set_chat(message: types.Message):
@@ -187,17 +202,27 @@ async def handle_all_messages(message: types.Message):
                 parse_mode="Markdown"
             )
         else:
-            await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
+            activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
             await database.update_score(user_id, points)
+            
+            builder = InlineKeyboardBuilder()
+            builder.button(text=f"⚖️ Опротестовать (0/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
+            
             await message.reply(
                 f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
+                reply_markup=builder.as_markup(),
                 parse_mode="Markdown"
             )
     elif action == 'remove_points':
-        await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
+        activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
         await database.update_score(user_id, -points)
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text=f"⚖️ Опротестовать (0/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
+        
         await message.reply(
             f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
+            reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     elif action == 'chat':
@@ -226,6 +251,40 @@ async def handle_vote(callback: CallbackQuery):
         builder.button(text=f"✅ База ({votes_count}/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
         await callback.answer("Голос принят.")
+
+@dp.callback_query(F.data.startswith("veto_"))
+async def handle_veto(callback: CallbackQuery):
+    activity_id = int(callback.data.split("_")[1])
+    voter_id = callback.from_user.id
+    
+    activity = await database.get_activity(activity_id)
+    if not activity:
+        await callback.answer("Деяние уже стерто из истории.", show_alert=True)
+        return
+        
+    if voter_id == activity['user_id']:
+        await callback.answer("Ты не можешь опротестовать свой собственный вердикт, это не по-пацански.", show_alert=True)
+        return
+        
+    votes_count = await database.add_vote(activity_id, voter_id)
+    
+    if votes_count == -1:
+        await callback.answer("Твоя воля уже учтена.", show_alert=True)
+        return
+    
+    if votes_count >= MIN_VOTES:
+        deleted_activity = await database.delete_activity(activity_id)
+        if deleted_activity:
+            await callback.message.edit_text(
+                f"⚖️ **ВЕРДИКТ БОТА ОПРОВЕРГНУТ!**\n\nПацаны решили, что это не база. История скорректирована.",
+                parse_mode="Markdown"
+            )
+            await callback.answer("Справедливость восстановлена.")
+    else:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=f"⚖️ Опротестовать ({votes_count}/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        await callback.answer("Твой голос против системы принят.")
 
 # Daily Penalty Task
 async def daily_penalty():

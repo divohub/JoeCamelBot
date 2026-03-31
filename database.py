@@ -100,6 +100,34 @@ async def get_top_users(limit=10):
         async with db.execute("SELECT * FROM users ORDER BY score DESC LIMIT ?", (limit,)) as cursor:
             return await cursor.fetchall()
 
+async def get_user_activities(user_id, limit=5):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit)) as cursor:
+            return await cursor.fetchall()
+
+async def get_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def delete_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            activity = await cursor.fetchone()
+            if activity:
+                # If it was already approved, we need to revert the points
+                if activity['is_approved']:
+                    await db.execute("UPDATE users SET score = score - ? WHERE user_id = ?", (activity['points'], activity['user_id']))
+                
+                await db.execute("DELETE FROM votes WHERE activity_id = ?", (activity_id,))
+                await db.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
+                await db.commit()
+                return activity
+    return None
+
 async def add_vote(activity_id, voter_id):
     async with aiosqlite.connect(DB_PATH) as db:
         try:
