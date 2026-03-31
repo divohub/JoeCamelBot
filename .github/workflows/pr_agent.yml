@@ -2,7 +2,7 @@ name: PR Agent
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronized]
+     types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
@@ -15,12 +15,29 @@ jobs:
       pull-requests: write
       contents: read
     steps:
+      # --- Шаг-детектор: проверим, видит ли GitHub твой ключ ---
+      - name: Check Secret
+        run: |
+          if [ -z "$TEST_KEY" ]; then
+            echo "❌ ОШИБКА: Ключ ПУСТОЙ! GitHub его не видит. Проверь раздел Repository secrets."
+            exit 1
+          else
+            echo "✅ Ключ на месте! Его длина: ${#TEST_KEY} символов."
+          fi
+        env:
+          TEST_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      # --- Сам агент ---
       - name: PR Agent action
         uses: Codium-ai/pr-agent@main
         env:
           CONFIG.MODEL: "gemini/gemini-3-pro-preview"
           CONFIG.FALLBACK_MODELS: "['gemini/gemini-1.5-pro']"
+          
+          # Передаем ключ в ОБЕ переменные (чтобы ядро агента не ругалось)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LITELLM_PARAMS: "reasoning_effort=high,temperature=1.0"
           PR_DESCRIPTION.PUBLISH_DESCRIPTION_AS_COMMENT: "true"
