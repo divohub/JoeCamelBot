@@ -202,27 +202,17 @@ async def handle_all_messages(message: types.Message):
                 parse_mode="Markdown"
             )
         else:
-            activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
+            await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
             await database.update_score(user_id, points)
-            
-            builder = InlineKeyboardBuilder()
-            builder.button(text=f"⚖️ Опротестовать (0/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
-            
             await message.reply(
                 f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
-                reply_markup=builder.as_markup(),
                 parse_mode="Markdown"
             )
     elif action == 'remove_points':
-        activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
+        await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
         await database.update_score(user_id, -points)
-        
-        builder = InlineKeyboardBuilder()
-        builder.button(text=f"⚖️ Опротестовать (0/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
-        
         await message.reply(
             f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
-            reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     elif action == 'chat':
@@ -251,40 +241,6 @@ async def handle_vote(callback: CallbackQuery):
         builder.button(text=f"✅ База ({votes_count}/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
         await callback.answer("Голос принят.")
-
-@dp.callback_query(F.data.startswith("veto_"))
-async def handle_veto(callback: CallbackQuery):
-    activity_id = int(callback.data.split("_")[1])
-    voter_id = callback.from_user.id
-    
-    activity = await database.get_activity(activity_id)
-    if not activity:
-        await callback.answer("Деяние уже стерто из истории.", show_alert=True)
-        return
-        
-    if voter_id == activity['user_id']:
-        await callback.answer("Ты не можешь опротестовать свой собственный вердикт, это не по-пацански.", show_alert=True)
-        return
-        
-    votes_count = await database.add_vote(activity_id, voter_id)
-    
-    if votes_count == -1:
-        await callback.answer("Твоя воля уже учтена.", show_alert=True)
-        return
-    
-    if votes_count >= MIN_VOTES:
-        deleted_activity = await database.delete_activity(activity_id)
-        if deleted_activity:
-            await callback.message.edit_text(
-                f"⚖️ **ВЕРДИКТ БОТА ОПРОВЕРГНУТ!**\n\nПацаны решили, что это не база. История скорректирована.",
-                parse_mode="Markdown"
-            )
-            await callback.answer("Справедливость восстановлена.")
-    else:
-        builder = InlineKeyboardBuilder()
-        builder.button(text=f"⚖️ Опротестовать ({votes_count}/{MIN_VOTES})", callback_data=f"veto_{activity_id}")
-        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-        await callback.answer("Твой голос против системы принят.")
 
 # Daily Penalty Task
 async def daily_penalty():
