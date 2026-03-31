@@ -3,8 +3,9 @@ import asyncio
 import logging
 import os
 import random
+import re
 from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types, F, html
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -69,7 +70,7 @@ async def is_direct_to_bot(message: types.Message):
         return True
         
     lower_text = message.text.lower()
-    if lower_text.startswith(("бот,", "бодя,", "шняга:", "эй бот")):
+    if re.search(r'\b(бот|бодя|джо|camel|верблюд|шняга)\b', lower_text):
         return True
         
     return False
@@ -193,8 +194,13 @@ async def handle_all_messages(message: types.Message):
     comment = ai_result.get('comment', '')
     is_mega = ai_result.get('is_mega', False) or category == 'Мега'
 
-    if action == 'ignore' or not comment:
+    if (action == 'ignore' or not comment) and not is_direct:
         return
+
+    # Fallback if AI still says ignore or returns empty comment for a direct mention
+    if (action == 'ignore' or not comment) and is_direct:
+        action = 'chat'
+        comment = "слышь, я сейчас не в настроении на философию. попробуй позже."
 
     mention = get_user_mention({'username': username, 'full_name': full_name})
 
