@@ -4,7 +4,7 @@ import logging
 import os
 import random
 from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, F, html
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -69,8 +69,7 @@ async def is_direct_to_bot(message: types.Message):
         return True
         
     lower_text = message.text.lower()
-    direct_keywords = ("бот", "бодя", "шняга", "эй бот", "джо", "джо кэмел", "верблюд")
-    if any(lower_text.startswith(word) for word in direct_keywords):
+    if lower_text.startswith(("бот,", "бодя,", "шняга:", "эй бот")):
         return True
         
     return False
@@ -93,7 +92,7 @@ async def cmd_start(message: types.Message):
                          "/help — Узнать все возможности\n"
                          "/top — Список достойных\n"
                          "/stats — Состояние твоего духа\n"
-                         "/setchat — Привязать штрафы к этому чату", parse_mode="HTML")
+                         "/setchat — Привязать штрафы к этому чату", parse_mode="Markdown")
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
@@ -104,7 +103,7 @@ async def cmd_help(message: types.Message):
                          "/top — Список лучших\n"
                          "/stats — Твой профиль и последние деяния\n"
                          "/setchat — Настройка чата\n\n"
-                         "Спрашивай с меня, если не согласен с вердиктом!", parse_mode="HTML")
+                         "Спрашивай с меня, если не согласен с вердиктом!", parse_mode="Markdown")
 
 @dp.message(Command("top"))
 async def cmd_top(message: types.Message):
@@ -112,11 +111,11 @@ async def cmd_top(message: types.Message):
     if not top_users:
         await message.answer("Список достойных пуст. Где ваша воля?")
         return
-    text = f"🏆 {html.bold('СПИСОК ДОСТОЙНЫХ')} 🏆\n\n"
+    text = "🏆 **СПИСОК ДОСТОЙНЫХ** 🏆\n\n"
     for i, user in enumerate(top_users, 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-        text += f"{medal} {get_user_mention(user)} — {html.bold(str(user['score']))} баллов силы\n"
-    await message.answer(text, parse_mode="HTML")
+        text += f"{medal} {get_user_mention(user)} — **{user['score']}** баллов силы\n"
+    await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
@@ -127,15 +126,15 @@ async def cmd_stats(message: types.Message):
     
     activities = await database.get_user_activities(message.from_user.id, limit=3)
     
-    msg = f"📊 {html.bold('Твоя база:')}\nБаланс силы: {html.bold(str(user['score']))}.\n\n"
+    msg = f"📊 **Твоя база:**\nБаланс силы: **{user['score']}**.\n\n"
     if activities:
         msg += "Последние деяния:\n"
         for act in activities:
             sign = "+" if act['points'] >= 0 else ""
-            comment_snippet = html.quote(act['description'][:20] + "..." if len(act['description']) > 20 else act['description'])
-            msg += f"• {html.quote(act['category'].capitalize())}: {sign}{act['points']} — {comment_snippet}\n"
+            comment_snippet = act['description'][:20] + "..." if len(act['description']) > 20 else act['description']
+            msg += f"• {act['category'].capitalize()}: {sign}{act['points']} — {comment_snippet}\n"
     
-    await message.answer(msg, parse_mode="HTML")
+    await message.answer(msg, parse_mode="Markdown")
 
 @dp.message(Command("setchat"))
 async def cmd_set_chat(message: types.Message):
@@ -194,19 +193,8 @@ async def handle_all_messages(message: types.Message):
     comment = ai_result.get('comment', '')
     is_mega = ai_result.get('is_mega', False) or category == 'Мега'
 
-    if action == 'ignore':
-        if is_direct:
-            action = 'chat'
-            if not comment:
-                comment = "че тебе надо? формулируй мысль как пацан, а не рогалик."
-        else:
-            return
-            
-    if not comment and action != 'ignore':
-        if is_direct:
-            comment = "молчу, потому что сказать нечего. делай базу."
-        else:
-            return
+    if action == 'ignore' or not comment:
+        return
 
     mention = get_user_mention({'username': username, 'full_name': full_name})
 
@@ -216,11 +204,11 @@ async def handle_all_messages(message: types.Message):
             builder = InlineKeyboardBuilder()
             builder.button(text=f"✅ База (0/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
             await message.reply(
-                f"🔥 {html.bold('ИСТИННАЯ СИЛА ОБНАРУЖЕНА!')} 🔥\n\n{mention} утверждает: {html.italic(html.quote(message.text))}\n\n"
-                f"Вердикт бота: {html.italic(html.quote(comment))}\n\n"
-                f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!",
+                f"🔥 **ИСТИННАЯ СИЛА ОБНАРУЖЕНА!** 🔥\n\n{mention} утверждает: *{message.text}*\n\n"
+                f"Вердикт бота: *{comment}*\n\n"
+                f"Пацаны, нужно **{MIN_VOTES} голоса**, чтобы вписать это в историю (+{points} баллов)!",
                 reply_markup=builder.as_markup(),
-                parse_mode="HTML"
+                parse_mode="Markdown"
             )
         else:
             activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
@@ -230,9 +218,9 @@ async def handle_all_messages(message: types.Message):
             builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
             
             await message.reply(
-                f"💎 {html.bold(f'база пополнена на {points} баллов!')}\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
+                f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
                 reply_markup=builder.as_markup(),
-                parse_mode="HTML"
+                parse_mode="Markdown"
             )
     elif action == 'remove_points':
         activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
@@ -242,9 +230,9 @@ async def handle_all_messages(message: types.Message):
         builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
         
         await message.reply(
-            f"💀 {html.bold(f'штраф {points} баллов силы!')}\n\n{html.italic(html.quote(comment))}",
+            f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
             reply_markup=builder.as_markup(),
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
     elif action == 'chat':
         await message.reply(comment)
@@ -263,8 +251,8 @@ async def handle_vote(callback: CallbackQuery):
         activity = await database.approve_activity(activity_id)
         if activity:
             await callback.message.edit_text(
-                f"✅ {html.bold('СИЛА ПОДТВЕРЖДЕНА!')}\n\n{html.italic(html.quote(activity['description']))}\n\nБаллы вписаны в базу.",
-                parse_mode="HTML"
+                f"✅ **СИЛА ПОДТВЕРЖДЕНА!**\n\n*{activity['description']}*\n\nБаллы вписаны в базу.",
+                parse_mode="Markdown"
             )
             await callback.answer("Успех.")
     else:
@@ -341,7 +329,7 @@ async def daily_penalty():
     chat_id = await database.get_setting("main_chat_id") or os.getenv("ADMIN_CHAT_ID")
     if chat_id:
         try:
-            await bot.send_message(chat_id, f"💀 {html.bold('ПОЛНОЧЬ. ВРЕМЯ РАСПЛАТЫ.')}\n\nС каждого списано по {html.bold('10 баллов')} за простой. Если сегодня ты не проявил силы — ты стал на шаг ближе к блажи.\n\nПроверь /top, если осмелишься.", parse_mode="HTML")
+            await bot.send_message(chat_id, "💀 **ПОЛНОЧЬ. ВРЕМЯ РАСПЛАТЫ.**\n\nС каждого списано по **10 баллов** за простой. Если сегодня ты не проявил силы — ты стал на шаг ближе к блажи.\n\nПроверь /top, если осмелишься.", parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Failed to send penalty message: {e}")
     logger.info("Daily penalty applied.")
@@ -384,7 +372,7 @@ async def heartbeat_audit():
         awards = data.get('awards', [])
         
         if comment:
-            msg = f"🛰 {html.bold('ВНЕЗАПНЫЙ АУДИТ БАЗЫ')} 🛰\n\n{html.quote(comment)}\n\n"
+            msg = f"🛰 **ВНЕЗАПНЫЙ АУДИТ БАЗЫ** 🛰\n\n{comment}\n\n"
             applied_awards = []
             
             if awards:
@@ -398,12 +386,12 @@ async def heartbeat_audit():
                         u_id = name_to_id[u_name]
                         await database.update_score(u_id, pts)
                         sign = "+" if pts > 0 else ""
-                        applied_awards.append(f"• {html.quote(u_name)}: {sign}{pts} баллов")
+                        applied_awards.append(f"• {u_name}: {sign}{pts} баллов")
             
             if applied_awards:
-                msg += f"{html.bold('⚖️ Изменения в базе:')}\n" + "\n".join(applied_awards)
+                msg += "⚖️ **Изменения в базе:**\n" + "\n".join(applied_awards)
             
-            await bot.send_message(chat_id_int, msg, parse_mode="HTML")
+            await bot.send_message(chat_id_int, msg, parse_mode="Markdown")
             # Clear history after audit to avoid double-processing the same block?
             # Or just keep it as a sliding window. Let's keep it as sliding window.
     except Exception as e:
