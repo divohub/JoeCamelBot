@@ -1,0 +1,29 @@
+name: PR Agent (Gemini)
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronized]
+  issue_comment:
+    types: [created]
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.issue.pull_request || github.event.pull_request }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    name: Run pr-agent
+    steps:
+      - name: PR Agent action
+        uses: Codium-ai/pr-agent@main
+        env:
+          # Сообщаем агенту, что используем Gemini
+          CONFIG.MODEL_RESOURCES__DEFAULT_MODEL: "gemini/gemini-1.5-pro"
+          # Передаем ключ
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Дополнительные настройки для удобства
+          PR_DESCRIPTION.PUBLISH_DESCRIPTION_AS_COMMENT: "true"
+          PR_REVIEW.REQUIRE_SCORE_REVIEW: "false"
