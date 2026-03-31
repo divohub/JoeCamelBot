@@ -215,6 +215,9 @@ async def handle_all_messages(message: types.Message):
 
     is_direct = await is_direct_to_bot(message)
     
+    # [LOGGING] Inbound message details
+    logger.info(f"[INBOUND] User ID: {user_id}, Name: {full_name}, Text: {message.text}, is_direct: {is_direct}")
+    
     user_memory = await database.get_user_memory(user_id)
     
     user = await database.get_user(user_id)
@@ -251,6 +254,8 @@ async def handle_all_messages(message: types.Message):
         if 0 <= reply_to_idx < len(ctx_history):
             reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
 
+    # [LOGGING] AI Decision Trace
+    logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}'")
 
     if action == 'ignore':
         if is_direct:
@@ -448,6 +453,9 @@ async def heartbeat_audit():
         )
         
         data = json.loads(response.text)
+        # [LOGGING] Audit Trace
+        logger.info(f"[AUDIT] Heartbeat audit result: {response.text}")
+        
         comment = data.get('comment')
         awards = data.get('awards', [])
         

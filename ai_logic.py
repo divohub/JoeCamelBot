@@ -90,6 +90,8 @@ class AIScorer:
             )
             
             data = json.loads(response.text)
+            # [LOGGING] Log raw AI response for transparency
+            logger.info(f"[AI DECISION] Raw response from Gemini: {response.text}")
             return data
         except Exception as e:
             logger.error(f"AI analysis error: {e}")
