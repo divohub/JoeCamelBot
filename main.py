@@ -190,14 +190,14 @@ async def handle_all_messages(message: types.Message):
             await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
             await database.update_score(user_id, points)
             await message.reply(
-                f"💎 **База пополнена на {points} баллов!**\nРазряд: {category}\n\n*{comment}*",
+                f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
                 parse_mode="Markdown"
             )
     elif action == 'remove_points':
-        await database.add_activity(user_id, message.text, -points, "Анти-Шняга", is_mega=False, is_approved=True)
+        await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
         await database.update_score(user_id, -points)
         await message.reply(
-            f"💀 **ШТРАФ {points} БАЛЛОВ СИЛЫ!**\n\n*{comment}*",
+            f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
             parse_mode="Markdown"
         )
     elif action == 'chat':
@@ -255,12 +255,12 @@ async def heartbeat_audit():
         return
         
     audit_prompt = (
-        "Ты — Шняга-Бот. Проведи внезапный аудит последних событий в чате. "
-        "Посмотри, кто проявлял силу, кто нес блажь, а кто просто молчал. "
-        "Выдай язвительное или одобряющее саммари последних 15 сообщений. "
-        "Используй наши термины: База, Сила, Рогалик, Анти, Блажь. "
-        "Можешь раздать небольшие бонусы (+5) или штрафы (-5) за общее поведение. "
-        "Ответь в JSON: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
+        "ты — джо кэмел. проведи внезапный аудит последних событий в чате. "
+        "посмотри, кто проявлял силу, кто нес блажь, а кто просто молчал. "
+        "выдай язвительное или одобряющее саммари последних 15 сообщений. "
+        "используй наши термины: база, сила, рогалик, анти, блажь. "
+        "можешь раздать небольшие бонусы (+5) или штрафы (-5) за общее поведение. "
+        "ответь в json: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
     )
     
     try:
