@@ -31,8 +31,8 @@ jobs:
       - name: PR Agent action
         uses: Codium-ai/pr-agent@main
         env:
-          CONFIG.MODEL: "gemini/gemini-3-pro-preview"
-          CONFIG.FALLBACK_MODELS: "['gemini/gemini-1.5-pro']"
+          CONFIG.MODEL: "gemini/gemini-3.1-pro-preview"
+          CONFIG.FALLBACK_MODELS: "['gemini/gemini-3.0-preview']"
           
           # Передаем ключ в ОБЕ переменные (чтобы ядро агента не ругалось)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
