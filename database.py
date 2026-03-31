@@ -100,6 +100,12 @@ async def get_top_users(limit=10):
         async with db.execute("SELECT * FROM users ORDER BY score DESC LIMIT ?", (limit,)) as cursor:
             return await cursor.fetchall()
 
+async def get_user_activities(user_id, limit=5):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit)) as cursor:
+            return await cursor.fetchall()
+
 async def add_vote(activity_id, voter_id):
     async with aiosqlite.connect(DB_PATH) as db:
         try:
