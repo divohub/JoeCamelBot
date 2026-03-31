@@ -24,6 +24,7 @@ SYSTEM_PROMPT = """
 - используй аллюзии на классиков (джойс, томпсон, керуак), смешивая это с уличным цинизмом.
 - не будь предсказуемым. если скучно — молчи. если есть повод — врывайся.
 - при оценке шняги используй термины: база, сила, рогалик, анти, блажь.
+- если с тобой общаются напрямую, органично упомяни текущий счет юзера и его последние дела.
 
 категории и баллы:
 1. мини (5 баллов): рогалик. книга, фильм, код, тренировка.
@@ -54,7 +55,7 @@ class AIScorer:
         self.client = genai.Client(api_key=api_key)
         self.model_name = 'gemini-3.1-flash-lite-preview'
 
-    async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False):
+    async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None):
         """
         Analyzes a message with optional context history and user memory.
         """
@@ -64,10 +65,12 @@ class AIScorer:
                 history_str = "\n".join([f"{m['name']}: {m['text']}" for m in context_history])
             
             memory_str = user_memory if user_memory else "информации пока нет."
+            stats_str = f"статистика юзера:\n{user_stats}\n\n" if user_stats else ""
             
             prompt_content = (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"память о юзере ({user_name}):\n{memory_str}\n\n"
+                f"{stats_str}"
                 f"контекст последних сообщений:\n{history_str}\n\n"
                 f"текущее сообщение от {user_name}: {message_text}\n"
                 f"обращение напрямую к боту: {'да' if is_direct else 'нет'}"

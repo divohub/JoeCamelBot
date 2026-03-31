@@ -56,7 +56,30 @@ async def init_db():
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
             )
         """)
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS disputes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                activity_id INTEGER,
+                chat_id INTEGER,
+                message_id INTEGER,
+                poll_id TEXT,
+                status TEXT DEFAULT 'gathering',
+                target_votes INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (activity_id) REFERENCES activities (id)
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS dispute_signatures (
+                dispute_id INTEGER,
+                user_id INTEGER,
+                PRIMARY KEY (dispute_id, user_id),
+                FOREIGN KEY (dispute_id) REFERENCES disputes (id)
+            )
+        ''')
         await db.commit()
+
 
 async def get_user(user_id):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -99,6 +122,34 @@ async def get_top_users(limit=10):
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users ORDER BY score DESC LIMIT ?", (limit,)) as cursor:
             return await cursor.fetchall()
+
+async def get_user_activities(user_id, limit=5):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit)) as cursor:
+            return await cursor.fetchall()
+
+async def get_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def delete_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            activity = await cursor.fetchone()
+            if activity:
+                # If it was already approved, we need to revert the points
+                if activity['is_approved']:
+                    await db.execute("UPDATE users SET score = score - ? WHERE user_id = ?", (activity['points'], activity['user_id']))
+                
+                await db.execute("DELETE FROM votes WHERE activity_id = ?", (activity_id,))
+                await db.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
+                await db.commit()
+                return activity
+    return None
 
 async def add_vote(activity_id, voter_id):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -147,4 +198,74 @@ async def update_user_memory(user_id, memory_text):
             "ON CONFLICT(user_id) DO UPDATE SET memory_text = excluded.memory_text, updated_at = CURRENT_TIMESTAMP",
             (user_id, memory_text)
         )
+        await db.commit()
+
+
+async def get_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def delete_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            activity = await cursor.fetchone()
+            if activity:
+                if activity['is_approved']:
+                    await db.execute("UPDATE users SET score = score - ? WHERE user_id = ?", (activity['points'], activity['user_id']))
+                await db.execute("DELETE FROM votes WHERE activity_id = ?", (activity_id,))
+                await db.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
+                await db.commit()
+                return activity
+    return None
+
+async def create_dispute(activity_id, chat_id, message_id, target_votes):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO disputes (activity_id, chat_id, message_id, target_votes) VALUES (?, ?, ?, ?)",
+            (activity_id, chat_id, message_id, target_votes)
+        )
+        dispute_id = cursor.lastrowid
+        await db.commit()
+        return dispute_id
+
+async def get_dispute_by_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM disputes WHERE activity_id = ?", (activity_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def add_dispute_signature(dispute_id, user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute("INSERT INTO dispute_signatures (dispute_id, user_id) VALUES (?, ?)", (dispute_id, user_id))
+            await db.commit()
+            async with db.execute("SELECT COUNT(*) FROM dispute_signatures WHERE dispute_id = ?", (dispute_id,)) as cursor:
+                count = (await cursor.fetchone())[0]
+                return count
+        except aiosqlite.IntegrityError:
+            return -1
+
+async def update_dispute_poll(dispute_id, poll_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE disputes SET status = 'polling', poll_id = ? WHERE id = ?", (poll_id, dispute_id))
+        await db.commit()
+
+async def get_dispute_by_poll_id(poll_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM disputes WHERE poll_id = ?", (poll_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def set_dispute_status(dispute_id, status):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE disputes SET status = ? WHERE id = ?", (status, dispute_id))
+        await db.commit()
+
+async def delete_dispute(dispute_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM dispute_signatures WHERE dispute_id = ?", (dispute_id,))
+        await db.execute("DELETE FROM disputes WHERE id = ?", (dispute_id,))
         await db.commit()

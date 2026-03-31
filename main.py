@@ -86,18 +86,22 @@ async def cmd_start(message: types.Message):
     await database.update_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await message.answer("Приветствую. Я Шняга-Бот, арбитр этого чата. \n\n"
                          "Моя миссия — следить за вашим духом и телом. За истинную СИЛУ и БАЗУ — поощряю. За АНТИ и БЛАЖЬ — караю баллом и словом. \n\n"
-                         "**Законы этого места:**\n"
-                         "💎 Мини — 5 баллов (Рогалик)\n"
-                         "💎 Средняя — 10 баллов (База)\n"
-                         "💎 Большая — 15 баллов (Сила)\n"
-                         "💎 Экстра — 20 баллов (Истинная Сила)\n"
-                         "🔥 Мега — 150 баллов (Сила легенд, требует одобения пацанов)\n"
-                         "💀 Анти/Блажь — штраф от 5 до 20 баллов\n"
-                         "⚠️ Каждую полночь: -10 баллов каждому за простой.\n\n"
                          "Команды:\n"
+                         "/help — Узнать все возможности\n"
                          "/top — Список достойных\n"
                          "/stats — Состояние твоего духа\n"
                          "/setchat — Привязать штрафы к этому чату", parse_mode="Markdown")
+
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer("Я — Шняга-Бот, арбитр этого чата. Мои законы:\n\n"
+                         "💎 Мини (5), Средняя (10), Большая (15), Экстра (20), Мега (150)\n"
+                         "💀 Анти/Блажь — караются\n\n"
+                         "Команды:\n"
+                         "/top — Список лучших\n"
+                         "/stats — Твой профиль и последние деяния\n"
+                         "/setchat — Настройка чата\n\n"
+                         "Спрашивай с меня, если не согласен с вердиктом!", parse_mode="Markdown")
 
 @dp.message(Command("top"))
 async def cmd_top(message: types.Message):
@@ -117,7 +121,18 @@ async def cmd_stats(message: types.Message):
     if not user:
         await message.answer("Твои следы еще не впечатаны в нашу базу. Напиши /start")
         return
-    await message.answer(f"📊 **Твоя база:**\nБаланс силы: **{user['score']}**.\nСтремись к большему.", parse_mode="Markdown")
+    
+    activities = await database.get_user_activities(message.from_user.id, limit=3)
+    
+    msg = f"📊 **Твоя база:**\nБаланс силы: **{user['score']}**.\n\n"
+    if activities:
+        msg += "Последние деяния:\n"
+        for act in activities:
+            sign = "+" if act['points'] >= 0 else ""
+            comment_snippet = act['description'][:20] + "..." if len(act['description']) > 20 else act['description']
+            msg += f"• {act['category'].capitalize()}: {sign}{act['points']} — {comment_snippet}\n"
+    
+    await message.answer(msg, parse_mode="Markdown")
 
 @dp.message(Command("setchat"))
 async def cmd_set_chat(message: types.Message):
@@ -150,13 +165,20 @@ async def handle_all_messages(message: types.Message):
     
     user_memory = await database.get_user_memory(user_id)
     
+    user = await database.get_user(user_id)
+    user_stats_str = f"Счет: {user['score']}" if user else ""
+    activities = await database.get_user_activities(user_id, limit=3)
+    if activities:
+        user_stats_str += ", последние дела: " + ", ".join([a['description'][:15] for a in activities])
+    
     # Proactive AI check for EVERY message (Lite model makes it cheap)
     ai_result = await scorer.analyze_message(
         message.text, 
         full_name, 
         user_memory=user_memory,
         context_history=history[:-1], 
-        is_direct=is_direct
+        is_direct=is_direct,
+        user_stats=user_stats_str
     )
     
     update_memory = ai_result.get('update_memory')
@@ -187,17 +209,27 @@ async def handle_all_messages(message: types.Message):
                 parse_mode="Markdown"
             )
         else:
-            await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
+            activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
             await database.update_score(user_id, points)
+            
+            builder = InlineKeyboardBuilder()
+            builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
+            
             await message.reply(
                 f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
+                reply_markup=builder.as_markup(),
                 parse_mode="Markdown"
             )
     elif action == 'remove_points':
-        await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
+        activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
         await database.update_score(user_id, -points)
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
+        
         await message.reply(
             f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
+            reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     elif action == 'chat':
@@ -226,6 +258,68 @@ async def handle_vote(callback: CallbackQuery):
         builder.button(text=f"✅ База ({votes_count}/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
         await callback.answer("Голос принят.")
+
+@dp.callback_query(F.data.startswith("dispute_"))
+async def handle_dispute(callback: CallbackQuery):
+    activity_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    dispute = await database.get_dispute_by_activity(activity_id)
+    member_count = await bot.get_chat_member_count(chat_id)
+    required_to_launch = ((member_count - 1) // 2) + 1
+    
+    if not dispute:
+        dispute_id = await database.create_dispute(activity_id, chat_id, callback.message.message_id, required_to_launch)
+    else:
+        dispute_id = dispute['id']
+        
+    signatures_count = await database.add_dispute_signature(dispute_id, user_id)
+    
+    if signatures_count == -1:
+        await callback.answer("Ты уже подписался на диспут.", show_alert=True)
+        return
+        
+    if signatures_count >= required_to_launch:
+        poll_msg = await bot.send_poll(
+            chat_id=chat_id,
+            question=f"Опровергнуть вердикт бота по делу #{activity_id}?",
+            options=["Отменить решение", "Оставить как есть"],
+            is_anonymous=False
+        )
+        await database.update_dispute_poll(dispute_id, poll_msg.poll.id)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("Диспут запущен! Голосуйте в опросе.")
+    else:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=f"⚖️ Сбор на диспут ({signatures_count}/{required_to_launch})", callback_data=f"dispute_{activity_id}")
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        await callback.answer("Подпись принята.")
+
+@dp.poll()
+async def handle_poll(poll: types.Poll):
+    dispute = await database.get_dispute_by_poll_id(poll.id)
+    if not dispute:
+        return
+        
+    if dispute['status'] != 'polling':
+        return
+        
+    cancel_votes = poll.options[0].voter_count
+    keep_votes = poll.options[1].voter_count
+    
+    if keep_votes > 0:
+        await database.set_dispute_status(dispute['id'], 'rejected')
+        await bot.send_message(dispute['chat_id'], f"⚖️ Диспут по делу #{dispute['activity_id']} провален! Вердикт остается в силе.")
+        return
+        
+    member_count = await bot.get_chat_member_count(dispute['chat_id'])
+    required_to_win = member_count - 1
+    
+    if cancel_votes >= required_to_win:
+        await database.set_dispute_status(dispute['id'], 'resolved')
+        await database.delete_activity(dispute['activity_id'])
+        await bot.send_message(dispute['chat_id'], f"⚖️ Диспут по делу #{dispute['activity_id']} выигран! Вердикт отменен, баллы возвращены.")
 
 # Daily Penalty Task
 async def daily_penalty():
