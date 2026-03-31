@@ -118,24 +118,60 @@ async def cmd_top(message: types.Message):
         text += f"{medal} {get_user_mention(user)} — {html.bold(str(user['score']))} баллов силы\n"
     await message.answer(text, parse_mode="HTML")
 
-@dp.message(Command("stats"))
-async def cmd_stats(message: types.Message):
-    user = await database.get_user(message.from_user.id)
+async def render_stats_message(user_id: int, page: int = 0):
+    user = await database.get_user(user_id)
     if not user:
-        await message.answer("Твои следы еще не впечатаны в нашу базу. Напиши /start")
-        return
+        return "Твои следы еще не впечатаны в нашу базу. Напиши /start", None
     
-    activities = await database.get_user_activities(message.from_user.id, limit=3)
+    limit = 5
+    offset = page * limit
+    activities = await database.get_user_activities(user_id, limit=limit, offset=offset)
+    total_count = await database.get_user_activities_count(user_id)
     
     msg = f"📊 {html.bold('Твоя база:')}\nБаланс силы: {html.bold(str(user['score']))}.\n\n"
-    if activities:
-        msg += "Последние деяния:\n"
+    if total_count > 0:
+        total_pages = (total_count + limit - 1) // limit
+        msg += f"Деяния (страница {page + 1}/{total_pages}):\n"
         for act in activities:
-            sign = "+" if act['points'] >= 0 else ""
-            comment_snippet = html.quote(act['description'][:20] + "..." if len(act['description']) > 20 else act['description'])
-            msg += f"• {html.quote(act['category'].capitalize())}: {sign}{act['points']} — {comment_snippet}\n"
+            is_positive = act['points'] >= 0
+            sign = "+" if is_positive else ""
+            indicator = "🟢" if is_positive else "🔴"
+            comment_snippet = html.quote(act['description'][:25] + "..." if len(act['description']) > 25 else act['description'])
+            msg += f"{indicator} {sign}{act['points']} — {html.quote(act['category'].capitalize())}: {comment_snippet}\n"
+            
+        # Pagination markup
+        builder = InlineKeyboardBuilder()
+        if page > 0:
+            builder.button(text="◀️ Назад", callback_data=f"stats_page_{page - 1}_{user_id}")
+        if page < total_pages - 1:
+            builder.button(text="Вперед ▶️", callback_data=f"stats_page_{page + 1}_{user_id}")
+            
+        return msg, builder.as_markup() if (page > 0 or page < total_pages - 1) else None
+    else:
+        msg += "Нет записей о деяниях."
+        return msg, None
+
+@dp.message(Command("stats"))
+async def cmd_stats(message: types.Message):
+    msg, markup = await render_stats_message(message.from_user.id, 0)
+    await message.answer(msg, reply_markup=markup, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("stats_page_"))
+async def handle_stats_pagination(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    page = int(parts[2])
+    user_id = int(parts[3])
     
-    await message.answer(msg, parse_mode="HTML")
+    if callback.from_user.id != user_id:
+        await callback.answer("Это не твоя статистика!", show_alert=True)
+        return
+        
+    msg, markup = await render_stats_message(user_id, page)
+    try:
+        await callback.message.edit_text(msg, reply_markup=markup, parse_mode="HTML")
+    except:
+        pass # message not modified
+    await callback.answer()
 
 @dp.message(Command("setchat"))
 async def cmd_set_chat(message: types.Message):
