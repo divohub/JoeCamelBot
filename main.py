@@ -90,6 +90,7 @@ async def cmd_start(message: types.Message):
                          "/help — Узнать все возможности\n"
                          "/top — Список достойных\n"
                          "/stats — Состояние твоего духа\n"
+                         "/dispute <id> <причина> — Оспорить вердикт\n"
                          "/setchat — Привязать штрафы к этому чату", parse_mode="Markdown")
 
 @dp.message(Command("help"))
@@ -100,6 +101,7 @@ async def cmd_help(message: types.Message):
                          "Команды:\n"
                          "/top — Список лучших\n"
                          "/stats — Твой профиль и последние деяния\n"
+                         "/dispute <id> <причина> — Оспорить вердикт бота\n"
                          "/setchat — Настройка чата\n\n"
                          "Спрашивай с меня, если не согласен с вердиктом!", parse_mode="Markdown")
 
@@ -138,6 +140,70 @@ async def cmd_stats(message: types.Message):
 async def cmd_set_chat(message: types.Message):
     await database.set_setting("main_chat_id", message.chat.id)
     await message.answer(f"✅ Чат признан ареной силы (ID: {message.chat.id}). Сюда будут приходить отчеты.")
+
+@dp.message(Command("dispute"))
+async def cmd_dispute(message: types.Message):
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer("Формат: /dispute <ID активности> <причина>")
+        return
+        
+    try:
+        activity_id = int(parts[1])
+    except ValueError:
+        await message.answer("ID активности должен быть числом.")
+        return
+        
+    reason = parts[2]
+    user_id = message.from_user.id
+    
+    activity = await database.get_activity(activity_id)
+    if not activity:
+        await message.answer(f"Активность с ID {activity_id} не найдена в базе.")
+        return
+        
+    if activity['user_id'] != user_id:
+        await message.answer("Ты можешь оспаривать только свои действия.")
+        return
+        
+    # Check if already disputed (we'll add this to DB shortly, but for now just process it)
+    await message.answer("🤔 Принято. Жди, пока я покурю и обдумаю твою претензию...")
+    
+    ai_result = await scorer.resolve_dispute(
+        activity['description'], 
+        activity['points'], 
+        reason, 
+        message.from_user.full_name
+    )
+    
+    action = ai_result.get('action', 'chat')
+    new_points = int(ai_result.get('points', activity['points']))
+    comment = ai_result.get('comment', 'передумал.')
+    
+    # Store the dispute
+    await database.add_dispute(activity_id, user_id, reason, 'resolved')
+    
+    diff = new_points - activity['points']
+    
+    if diff != 0:
+        await database.update_activity_points(activity_id, new_points)
+        await database.update_score(user_id, diff)
+        
+        sign = "+" if diff > 0 else ""
+        await message.reply(
+            f"⚖️ **ПЕРЕСМОТР СИЛЫ** [ID: {activity_id}]\n\n"
+            f"Оригинал: {activity['points']} баллов\n"
+            f"Новый итог: {new_points} баллов ({sign}{diff})\n\n"
+            f"*{comment}*",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.reply(
+            f"⚖️ **ПЕРЕСМОТР СИЛЫ** [ID: {activity_id}]\n\n"
+            f"Баллы оставлены без изменений ({activity['points']}).\n\n"
+            f"*{comment}*",
+            parse_mode="Markdown"
+        )
 
 # Main logic: Handle all messages
 @dp.message(F.text)
@@ -202,17 +268,17 @@ async def handle_all_messages(message: types.Message):
                 parse_mode="Markdown"
             )
         else:
-            await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
+            activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
             await database.update_score(user_id, points)
             await message.reply(
-                f"💎 **база пополнена на {points} баллов!**\nразряд: {category}\n\n*{comment}*",
+                f"💎 **база пополнена на {points} баллов!**\nразряд: {category} [ID: {activity_id}]\n\n*{comment}*",
                 parse_mode="Markdown"
             )
     elif action == 'remove_points':
-        await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
+        activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
         await database.update_score(user_id, -points)
         await message.reply(
-            f"💀 **штраф {points} баллов силы!**\n\n*{comment}*",
+            f"💀 **штраф {points} баллов силы!** [ID: {activity_id}]\n\n*{comment}*",
             parse_mode="Markdown"
         )
     elif action == 'chat':

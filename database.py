@@ -154,3 +154,41 @@ async def update_user_memory(user_id, memory_text):
             (user_id, memory_text)
         )
         await db.commit()
+
+async def add_dispute(activity_id, user_id, reason, status='pending'):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO disputes (activity_id, user_id, reason, status) VALUES (?, ?, ?, ?)",
+            (activity_id, user_id, reason, status)
+        )
+        await db.commit()
+
+async def update_activity_points(activity_id, new_points):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE activities SET points = ? WHERE id = ?",
+            (new_points, activity_id)
+        )
+        await db.commit()
+
+async def get_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            return await cursor.fetchone()
+
+async def delete_activity(activity_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM activities WHERE id = ?", (activity_id,)) as cursor:
+            activity = await cursor.fetchone()
+            if activity:
+                # If it was already approved, we need to revert the points
+                if activity['is_approved']:
+                    await db.execute("UPDATE users SET score = score - ? WHERE user_id = ?", (activity['points'], activity['user_id']))
+                
+                await db.execute("DELETE FROM votes WHERE activity_id = ?", (activity_id,))
+                await db.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
+                await db.commit()
+                return activity
+    return None

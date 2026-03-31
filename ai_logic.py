@@ -95,3 +95,80 @@ class AIScorer:
                     "update_memory": None
                 }
             return {"action": "ignore"}
+
+    async def resolve_dispute(self, activity_text, original_score, user_reason, user_name):
+        """
+        Re-evaluates an activity score based on user's dispute reason.
+        """
+        try:
+            prompt_content = (
+                f"{SYSTEM_PROMPT}\n\n"
+                f"юзер ({user_name}) оспаривает твою оценку его действия.\n"
+                f"действие: {activity_text}\n"
+                f"ты дал баллов: {original_score}\n"
+                f"аргумент юзера: {user_reason}\n\n"
+                f"твоя задача — пересмотреть или оставить баллы, учитывая аргумент.\n"
+                f"верни json с 'action': 'add_points' или 'remove_points' или 'chat' (если не меняешь баллы), "
+                f"'points': НОВЫЙ ИТОГОВЫЙ БАЛЛ (или 0, если не меняешь), "
+                f"'comment': 'твой ответ, признающий или отвергающий аргумент', "
+                f"'category': 'диалог', 'is_mega': false, 'update_memory': null"
+            )
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt_content,
+                config={
+                    'response_mime_type': 'application/json',
+                }
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"AI dispute error: {e}")
+            return {
+                "action": "chat",
+                "points": original_score,
+                "category": "диалог",
+                "comment": "мои шестеренки заржавели, не могу переоценить. оставим как есть.",
+                "is_mega": False,
+                "update_memory": None
+            }
+        """
+        Analyzes a message with optional context history and user memory.
+        """
+        try:
+            history_str = ""
+            if context_history:
+                history_str = "\n".join([f"{m['name']}: {m['text']}" for m in context_history])
+            
+            memory_str = user_memory if user_memory else "информации пока нет."
+            
+            prompt_content = (
+                f"{SYSTEM_PROMPT}\n\n"
+                f"память о юзере ({user_name}):\n{memory_str}\n\n"
+                f"контекст последних сообщений:\n{history_str}\n\n"
+                f"текущее сообщение от {user_name}: {message_text}\n"
+                f"обращение напрямую к боту: {'да' if is_direct else 'нет'}"
+            )
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt_content,
+                config={
+                    'response_mime_type': 'application/json',
+                }
+            )
+            
+            data = json.loads(response.text)
+            return data
+        except Exception as e:
+            logger.error(f"AI analysis error: {e}")
+            if is_direct:
+                return {
+                    "action": "chat",
+                    "points": 0,
+                    "category": "диалог",
+                    "comment": "слышь, я сейчас не в настроении на философию. попробуй позже.",
+                    "is_mega": False,
+                    "update_memory": None
+                }
+            return {"action": "ignore"}

@@ -1,3 +1,5 @@
 /logs
 /.env
 /data/shnyaga.db
+__pycache__/
+venv/
