@@ -23,7 +23,7 @@ jobs:
       # Step 1: Failsafe check to ensure the API key is passed correctly from GitHub Secrets
       - name: Check API Key Secret
         run: |
-          if[ -z "$TEST_KEY" ]; then
+          if [ -z "$TEST_KEY" ]; then
             echo "❌ ERROR: GEMINI_API_KEY is empty or missing! Check Repository Secrets."
             exit 1
           else
