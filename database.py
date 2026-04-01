@@ -1,3 +1,4 @@
+import difflib
 import aiosqlite
 import datetime
 
@@ -306,3 +307,35 @@ async def check_audit_cooldown(user_id, hours=3):
             if (now - last_time).total_seconds() >= hours * 3600:
                 return True
             return False
+
+
+async def find_user_by_name(name_query):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users") as cursor:
+            users = await cursor.fetchall()
+            
+    if not users:
+        return None
+        
+    names = []
+    user_map = {}
+    for u in users:
+        if u['full_name']:
+            names.append(u['full_name'])
+            user_map[u['full_name']] = u
+        if u['username']:
+            names.append(u['username'])
+            user_map[u['username']] = u
+            
+    matches = difflib.get_close_matches(name_query, names, n=1, cutoff=0.4)
+    if matches:
+        return user_map[matches[0]]
+        
+    # fallback: substring match
+    name_lower = name_query.lower()
+    for name in names:
+        if name_lower in name.lower() or name.lower() in name_lower:
+            return user_map[name]
+            
+    return None

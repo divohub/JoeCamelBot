@@ -247,6 +247,7 @@ async def handle_all_messages(message: types.Message):
     comment = ai_result.get('comment', '')
     is_mega = ai_result.get('is_mega', False) or category == 'Мега'
     reply_to_idx = ai_result.get('reply_to_idx')
+    target_user_name = ai_result.get('target_user')
 
     reply_args = {}
     if reply_to_idx is not None and isinstance(reply_to_idx, int):
@@ -263,7 +264,7 @@ async def handle_all_messages(message: types.Message):
         reply_args['reply_to_message_id'] = message.message_id
 
     # [LOGGING] AI Decision Trace
-    logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}'")
+    logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}', target: {target_user_name}")
 
     if action == 'ignore':
         if is_direct:
@@ -282,43 +283,84 @@ async def handle_all_messages(message: types.Message):
     mention = get_user_mention({'username': username, 'full_name': full_name})
 
     if action == 'add_points':
-        if is_mega:
-            activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=True, is_approved=False)
+        target_user_id = user_id
+        is_voting_required = is_mega
+        
+        if target_user_name:
+            target_user = await database.find_user_by_name(target_user_name)
+            if target_user:
+                target_user_id = target_user['user_id']
+                mention = get_user_mention(target_user)
+                if target_user_id != user_id:
+                    is_voting_required = True
+            else:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Я не знаю кто такой {html.quote(target_user_name)}, братан. Пусть сначала забазируется в чате (/start).",
+                    **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+                )
+                return
+
+        if is_voting_required:
+            activity_id = await database.add_activity(target_user_id, message.text, points, category, is_mega=True, is_approved=False)
             builder = InlineKeyboardBuilder()
             builder.button(text=f"✅ База (0/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
+            
+            if target_user_id != user_id:
+                text = f"🔥 {mention} реально титан. Пацаны, +{points} за базу?\n\n" \
+                       f"Запрос от {get_user_mention({'username': username, 'full_name': full_name})}: {html.italic(html.quote(message.text))}\n\n" \
+                       f"Вердикт бота: {html.italic(html.quote(comment))}\n\n" \
+                       f"Нужно {html.bold(str(MIN_VOTES))} голоса!"
+            else:
+                text = f"🔥 {html.bold('ИСТИННАЯ СИЛА ОБНАРУЖЕНА!')} 🔥\n\n{mention} утверждает: {html.italic(html.quote(message.text))}\n\n" \
+                       f"Вердикт бота: {html.italic(html.quote(comment))}\n\n" \
+                       f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!"
+
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"🔥 {html.bold('ИСТИННАЯ СИЛА ОБНАРУЖЕНА!')} 🔥\n\n{mention} утверждает: {html.italic(html.quote(message.text))}\n\n"
-                     f"Вердикт бота: {html.italic(html.quote(comment))}\n\n"
-                     f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!",
+                text=text,
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
                 **reply_args
             )
         else:
-            activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
-            await database.update_score(user_id, points)
+            activity_id = await database.add_activity(target_user_id, message.text, points, category, is_mega=False, is_approved=True)
+            await database.update_score(target_user_id, points)
             
             builder = InlineKeyboardBuilder()
             builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
             
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"💎 {html.bold(f'база пополнена на {points} баллов!')}\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
+                text=f"💎 {html.bold(f'база пополнена на {points} баллов!')} ({mention})\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
                 **reply_args
             )
     elif action == 'remove_points':
-        activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
-        await database.update_score(user_id, -points)
+        target_user_id = user_id
+        if target_user_name:
+            target_user = await database.find_user_by_name(target_user_name)
+            if target_user:
+                target_user_id = target_user['user_id']
+                mention = get_user_mention(target_user)
+            else:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Я не знаю кто такой {html.quote(target_user_name)}, братан.",
+                    **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+                )
+                return
+
+        activity_id = await database.add_activity(target_user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
+        await database.update_score(target_user_id, -points)
         
         builder = InlineKeyboardBuilder()
         builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
         
         await bot.send_message(
             chat_id=chat_id,
-            text=f"💀 {html.bold(f'штраф {points} баллов силы!')}\n\n{html.italic(html.quote(comment))}",
+            text=f"💀 {html.bold(f'штраф {points} баллов силы!')} ({mention})\n\n{html.italic(html.quote(comment))}",
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
             **reply_args
