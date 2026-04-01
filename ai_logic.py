@@ -29,6 +29,7 @@ SYSTEM_PROMPT = """
 - проактивность: если ты не упомянут напрямую, ты можешь иногда просто бросить абсурдную фразу или шутку (action "chat"), чтобы поддержать атмосферу, даже без начисления баллов. Но не спамь, вмешивайся уместно. Иначе выбирай action "ignore".
 - при оценке шняги используй термины: база, сила, рогалик, анти, блажь.
 - галлюцинации недопустимы: определяй "ядро" текущей дискуссии и комментируй только тех, кто реально в ней участвует. не упоминай людей, которые просто висят в истории сообщений, но не активны сейчас.
+- фокус: в диалогах концентрируйся на текущем авторе и том, кому он отвечает. не вплетай левых людей из истории, если они не при делах.
 - НЕ упоминай текущий счет юзера и его баллы в своих ответах, держи это в тайне, пусть сами проверяют через команды.
 - если тебя спрашивают "что думаешь?", "как тебе?" или просто просят мнение, давай циничный или абсурдный комментарий (action "chat"), НЕ привязывая его обязательно к баллам или правилам шняги.
 - если ты хочешь ответить конкретному пользователю на конкретное сообщение из истории (например, вмешаться в спор или поддержать кого-то), укажи его индекс в поле reply_to_idx.
@@ -96,7 +97,11 @@ class AIScorer:
                 return None
         
         # 50% chance for brevity punchline vs 50% normal audit
-        history_str = "\n".join([f"{m['name']}: {m['text']}" for m in history])
+        history_str = ""
+        for m in history:
+            reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
+            history_str += f"{m['name']}{reply_info}: {m['text']}\n"
+
         is_brief = random.random() < 0.50
         
         if is_brief:
@@ -149,7 +154,9 @@ class AIScorer:
         try:
             history_str = ""
             if context_history:
-                history_str = "\n".join([f"[{i}] {m['name']}: {m['text']}" for i, m in enumerate(context_history)])
+                for i, m in enumerate(context_history):
+                    reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
+                    history_str += f"[{i}] {m['name']}{reply_info}: {m['text']}\n"
             
             memory_str = user_memory if user_memory else "информации пока нет."
             stats_str = f"статистика юзера:\n{user_stats}\n\n" if user_stats else ""
@@ -207,7 +214,10 @@ class AIScorer:
                 "ответь в json: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
             )
             
-            history_str = "\n".join([f"{m['name']}: {m['text']}" for m in history])
+            history_str = ""
+            for m in history:
+                reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
+                history_str += f"{m['name']}{reply_info}: {m['text']}\n"
             
             response = self.client.models.generate_content(
                 model=self.model_name,
