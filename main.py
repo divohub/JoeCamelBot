@@ -442,16 +442,23 @@ async def heartbeat_audit():
         last_audits_str = "Пока нет."
         
     try:
-        data = await scorer.analyze_audit(history, last_audits_str)
+        data = await scorer.generate_audit(history, last_audits_str)
         if not data:
             return
             
+        if data.get("type") == "aimless":
+            # Just send the punchline text
+            msg = html.quote(data.get("text", "база спит"))
+            await bot.send_message(chat_id_int, msg, parse_mode="HTML")
+            return
+            
         comment = data.get('comment')
+        heading = data.get('heading', 'ВНЕЗАПНЫЙ АУДИТ БАЗЫ').upper()
         awards = data.get('awards', [])
         
         if comment:
             await database.add_audit(chat_id_int, comment)
-            msg = f"🛰 {html.bold('ВНЕЗАПНЫЙ АУДИТ БАЗЫ')} 🛰\n\n{html.quote(comment)}\n\n"
+            msg = f"🛰 {html.bold(heading)} 🛰\n\n{html.quote(comment)}\n\n"
             applied_awards = []
             
             if awards:
