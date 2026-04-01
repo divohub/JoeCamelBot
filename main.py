@@ -250,9 +250,17 @@ async def handle_all_messages(message: types.Message):
 
     reply_args = {}
     if reply_to_idx is not None and isinstance(reply_to_idx, int):
-        ctx_history = history[:-1]
-        if 0 <= reply_to_idx < len(ctx_history):
-            reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
+        if reply_to_idx == -1:
+            pass # Explicitly do not reply to any message
+        else:
+            ctx_history = history[:-1]
+            if 0 <= reply_to_idx < len(ctx_history):
+                reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
+            else:
+                reply_args['reply_to_message_id'] = message.message_id
+    else:
+        # Default behavior: reply to the current message
+        reply_args['reply_to_message_id'] = message.message_id
 
     # [LOGGING] AI Decision Trace
     logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}'")
@@ -285,7 +293,7 @@ async def handle_all_messages(message: types.Message):
                      f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
-                **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+                **reply_args
             )
         else:
             activity_id = await database.add_activity(user_id, message.text, points, category, is_mega=False, is_approved=True)
@@ -299,7 +307,7 @@ async def handle_all_messages(message: types.Message):
                 text=f"💎 {html.bold(f'база пополнена на {points} баллов!')}\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
-                **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+                **reply_args
             )
     elif action == 'remove_points':
         activity_id = await database.add_activity(user_id, message.text, -points, "анти", is_mega=False, is_approved=True)
@@ -313,13 +321,13 @@ async def handle_all_messages(message: types.Message):
             text=f"💀 {html.bold(f'штраф {points} баллов силы!')}\n\n{html.italic(html.quote(comment))}",
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
-            **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+            **reply_args
         )
     elif action == 'chat':
         await bot.send_message(
             chat_id=chat_id,
             text=comment,
-            **reply_args if reply_args else {"reply_to_message_id": message.message_id}
+            **reply_args
         )
 
 @dp.callback_query(F.data.startswith("vote_"))
