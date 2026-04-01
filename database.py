@@ -78,6 +78,23 @@ async def init_db():
                 FOREIGN KEY (dispute_id) REFERENCES disputes (id)
             )
         ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS audits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER,
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS audit_awards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                points INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (user_id)
+            )
+        ''')
         await db.commit()
 
 
@@ -255,3 +272,37 @@ async def delete_dispute(dispute_id):
         await db.execute("DELETE FROM dispute_signatures WHERE dispute_id = ?", (dispute_id,))
         await db.execute("DELETE FROM disputes WHERE id = ?", (dispute_id,))
         await db.commit()
+
+async def add_audit(chat_id, comment):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT INTO audits (chat_id, comment) VALUES (?, ?)", (chat_id, comment))
+        await db.commit()
+
+async def get_last_audits(chat_id, limit=3):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT comment FROM audits WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?", (chat_id, limit)) as cursor:
+            rows = await cursor.fetchall()
+            return [row['comment'] for row in rows]
+
+async def add_audit_award(user_id, points):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT INTO audit_awards (user_id, points) VALUES (?, ?)", (user_id, points))
+        await db.commit()
+
+async def check_audit_cooldown(user_id, hours=3):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT created_at FROM audit_awards WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return True
+            last_time_str = row['created_at']
+            # Parse SQLite default timestamp
+            # SQLite default CURRENT_TIMESTAMP format is 'YYYY-MM-DD HH:MM:SS'
+            import datetime
+            last_time = datetime.datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
+            now = datetime.datetime.utcnow()
+            if (now - last_time).total_seconds() >= hours * 3600:
+                return True
+            return False

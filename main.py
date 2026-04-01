@@ -435,32 +435,22 @@ async def heartbeat_audit():
     if not history:
         return
         
-    audit_prompt = (
-        "ты — джо кэмел. проведи внезапный аудит последних событий в чате. "
-        "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
-        "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
-        "выдай язвительное или одобряющее саммари активной дискуссии. "
-        "используй наши термины: база, сила, рогалик, анти, блажь. "
-        "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
-        "ответь в json: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
-    )
-    
+    last_audits = await database.get_last_audits(chat_id_int, limit=3)
+    if last_audits:
+        last_audits_str = "\n".join([f"- {a}" for a in last_audits])
+    else:
+        last_audits_str = "Пока нет."
+        
     try:
-        history_str = "\n".join([f"{m['name']}: {m['text']}" for m in history])
-        response = scorer.client.models.generate_content(
-            model=scorer.model_name,
-            contents=f"{audit_prompt}\n\nСобытия:\n{history_str}",
-            config={'response_mime_type': 'application/json'}
-        )
-        
-        data = json.loads(response.text)
-        # [LOGGING] Audit Trace
-        logger.info(f"[AUDIT] Heartbeat audit result: {response.text}")
-        
+        data = await scorer.analyze_audit(history, last_audits_str)
+        if not data:
+            return
+            
         comment = data.get('comment')
         awards = data.get('awards', [])
         
         if comment:
+            await database.add_audit(chat_id_int, comment)
             msg = f"🛰 {html.bold('ВНЕЗАПНЫЙ АУДИТ БАЗЫ')} 🛰\n\n{html.quote(comment)}\n\n"
             applied_awards = []
             
@@ -473,7 +463,12 @@ async def heartbeat_audit():
                     pts = a.get('points', 0)
                     if u_name in name_to_id and pts != 0:
                         u_id = name_to_id[u_name]
+                        if not await database.check_audit_cooldown(u_id, hours=3):
+                            logger.info(f"[AUDIT] Cooldown active for {u_name}, skipping award of {pts} points")
+                            continue
+                        
                         await database.update_score(u_id, pts)
+                        await database.add_audit_award(u_id, pts)
                         sign = "+" if pts > 0 else ""
                         applied_awards.append(f"• {html.quote(u_name)}: {sign}{pts} баллов")
             
