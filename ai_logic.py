@@ -106,3 +106,36 @@ class AIScorer:
                     "update_memory": None
                 }
             return {"action": "ignore"}
+
+    async def analyze_audit(self, history, last_audits_str):
+        """
+        Conducts a sudden audit of the chat history.
+        """
+        try:
+            audit_prompt = (
+                "ты — джо кэмел. проведи внезапный аудит последних событий в чате. "
+                "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
+                "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
+                "выдай язвительное или одобряющее саммари активной дискуссии. "
+                "используй наши термины: база, сила, рогалик, анти, блажь. "
+                "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
+                "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
+                f"{last_audits_str}\n\n"
+                "ответь в json: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
+            )
+            
+            history_str = "\n".join([f"{m['name']}: {m['text']}" for m in history])
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=f"{audit_prompt}\n\nСобытия:\n{history_str}",
+                config={'response_mime_type': 'application/json'}
+            )
+            
+            data = json.loads(response.text)
+            # [LOGGING] Audit Trace
+            logger.info(f"[AUDIT] Heartbeat audit result: {response.text}")
+            return data
+        except Exception as e:
+            logger.error(f"Audit analysis error: {e}")
+            return None
