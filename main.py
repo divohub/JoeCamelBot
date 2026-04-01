@@ -302,7 +302,7 @@ async def handle_all_messages(message: types.Message):
                 return
 
         if is_voting_required:
-            activity_id = await database.add_activity(target_user_id, message.text, points, category, is_mega=True, is_approved=False)
+            activity_id = await database.add_activity(target_user_id, message.text, points, category, is_mega=True, is_approved=False, target_votes=MIN_VOTES)
             builder = InlineKeyboardBuilder()
             builder.button(text=f"✅ База (0/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
             
@@ -360,10 +360,10 @@ async def handle_all_messages(message: types.Message):
             member_count = await bot.get_chat_member_count(chat_id)
             target_votes = (member_count // 2) + 1
             
-            activity_id = await database.add_activity(target_user_id, message.text, -points, "анти", is_mega=False, is_approved=False)
+            activity_id = await database.add_activity(target_user_id, message.text, -points, "анти", is_mega=False, is_approved=False, target_votes=target_votes)
             
             builder = InlineKeyboardBuilder()
-            builder.button(text=f"💀 Штраф (0/{target_votes})", callback_data=f"vote_{activity_id}_{target_votes}")
+            builder.button(text=f"💀 Штраф (0/{target_votes})", callback_data=f"vote_{activity_id}")
             
             text = f"💀 {get_user_mention({'username': username, 'full_name': full_name})} требует наказать {mention} на {points} баллов!\n\n" \
                    f"Причина: {html.italic(html.quote(message.text))}\n\n" \
@@ -403,9 +403,13 @@ async def handle_vote(callback: CallbackQuery):
     parts = callback.data.split("_")
     activity_id = int(parts[1])
     
-    target_votes = MIN_VOTES
-    if len(parts) > 2:
-        target_votes = int(parts[2])
+    # Securely fetch activity details (including target_votes) from database
+    activity = await database.get_activity(activity_id)
+    if not activity:
+        await callback.answer("Дело не найдено.", show_alert=True)
+        return
+        
+    target_votes = activity['target_votes'] or MIN_VOTES
         
     voter_id = callback.from_user.id
     votes_count = await database.add_vote(activity_id, voter_id)
@@ -426,15 +430,12 @@ async def handle_vote(callback: CallbackQuery):
         builder = InlineKeyboardBuilder()
         
         # Check if it's a penalty or a reward
-        activity = await database.get_activity(activity_id)
-        if activity and activity['points'] < 0:
+        if activity['points'] < 0:
             btn_text = f"💀 Штраф ({votes_count}/{target_votes})"
         else:
             btn_text = f"✅ База ({votes_count}/{target_votes})"
             
-        callback_suffix = f"_{target_votes}" if len(parts) > 2 else ""
-        
-        builder.button(text=btn_text, callback_data=f"vote_{activity_id}{callback_suffix}")
+        builder.button(text=btn_text, callback_data=f"vote_{activity_id}")
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
         await callback.answer("Голос принят.")
 

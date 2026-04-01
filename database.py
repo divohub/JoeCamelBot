@@ -31,10 +31,16 @@ async def init_db():
                 category TEXT,
                 is_mega BOOLEAN DEFAULT 0,
                 is_approved BOOLEAN DEFAULT 0,
+                target_votes INTEGER DEFAULT 0,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
             )
         """)
+        # Ensure column exists for migration
+        try:
+            await db.execute("ALTER TABLE activities ADD COLUMN target_votes INTEGER DEFAULT 0")
+        except:
+            pass # column already exists
         await db.execute("""
             CREATE TABLE IF NOT EXISTS votes (
                 activity_id INTEGER,
@@ -120,11 +126,11 @@ async def update_score(user_id, points):
         await db.execute("UPDATE users SET score = score + ? WHERE user_id = ?", (points, user_id))
         await db.commit()
 
-async def add_activity(user_id, description, points, category, is_mega=False, is_approved=True):
+async def add_activity(user_id, description, points, category, is_mega=False, is_approved=True, target_votes=0):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO activities (user_id, description, points, category, is_mega, is_approved) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, description, points, category, int(is_mega), int(is_approved))
+            "INSERT INTO activities (user_id, description, points, category, is_mega, is_approved, target_votes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, description, points, category, int(is_mega), int(is_approved), target_votes)
         )
         activity_id = cursor.lastrowid
         await db.commit()
