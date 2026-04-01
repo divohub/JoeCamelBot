@@ -1,3 +1,4 @@
+import re
 import json
 import asyncio
 import logging
@@ -68,9 +69,9 @@ async def is_direct_to_bot(message: types.Message):
     if f"@{bot_info.username}" in message.text:
         return True
         
-    lower_text = message.text.lower()
-    direct_keywords = ("бот", "бодя", "шняга", "эй бот", "джо", "джо кэмел", "верблюд")
-    if any(lower_text.startswith(word) for word in direct_keywords):
+    # Robust regex for bot keywords anywhere in the message
+    direct_keywords_regex = r"(?i)(бот|бодя|шняга|эй бот|джо|кэмел|верблюд|camel)"
+    if re.search(direct_keywords_regex, message.text):
         return True
         
     return False
@@ -163,15 +164,22 @@ async def handle_stats_pagination(callback: CallbackQuery):
     user_id = int(parts[3])
     
     if callback.from_user.id != user_id:
-        await callback.answer("Это не твоя статистика!", show_alert=True)
+        try:
+            await callback.answer("Это не твоя статистика!", show_alert=True)
+        except Exception:
+            pass
         return
         
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+
     msg, markup = await render_stats_message(user_id, page)
     try:
         await callback.message.edit_text(msg, reply_markup=markup, parse_mode="HTML")
     except:
         pass # message not modified
-    await callback.answer()
 
 @dp.message(Command("setchat"))
 async def cmd_set_chat(message: types.Message):
@@ -199,8 +207,10 @@ async def handle_all_messages(message: types.Message):
     
     # Store reply context
     reply_to_user = None
+    reply_to_id = None
     if message.reply_to_message and message.reply_to_message.from_user:
         reply_to_user = message.reply_to_message.from_user.full_name
+        reply_to_id = message.reply_to_message.from_user.id
 
     history.append({
         "message_id": message.message_id,
@@ -208,7 +218,8 @@ async def handle_all_messages(message: types.Message):
         "name": full_name, 
         "text": message.text, 
         "timestamp": datetime.now(),
-        "reply_to": reply_to_user
+        "reply_to_name": reply_to_user,
+        "reply_to_id": reply_to_id
     })
     if len(history) > MAX_HISTORY:
         history.pop(0)
@@ -400,14 +411,19 @@ async def handle_all_messages(message: types.Message):
 
 @dp.callback_query(F.data.startswith("vote_"))
 async def handle_vote(callback: CallbackQuery):
+    # Answer quickly to stop the spinner
+    try:
+        await callback.answer()
+    except Exception as e:
+        logger.warning(f"Failed to answer callback: {e}")
+
     parts = callback.data.split("_")
     activity_id = int(parts[1])
     
     # Securely fetch activity details (including target_votes) from database
     activity = await database.get_activity(activity_id)
     if not activity:
-        await callback.answer("Дело не найдено.", show_alert=True)
-        return
+        return # already answered above, just return
         
     target_votes = activity['target_votes'] or MIN_VOTES
         
@@ -415,7 +431,8 @@ async def handle_vote(callback: CallbackQuery):
     votes_count = await database.add_vote(activity_id, voter_id)
     
     if votes_count == -1:
-        await callback.answer("Твоя воля уже учтена.", show_alert=True)
+        # User already voted. Since we answered already, maybe send a private message or alert if needed.
+        # However, a simple return is also fine to keep it quiet.
         return
     
     if votes_count >= target_votes:
@@ -425,7 +442,6 @@ async def handle_vote(callback: CallbackQuery):
                 f"✅ {html.bold('РЕШЕНИЕ ПОДТВЕРЖДЕНО!')}\n\n{html.italic(html.quote(activity['description']))}\n\nБаллы вписаны в базу.",
                 parse_mode="HTML"
             )
-            await callback.answer("Успех.")
     else:
         builder = InlineKeyboardBuilder()
         
@@ -437,7 +453,6 @@ async def handle_vote(callback: CallbackQuery):
             
         builder.button(text=btn_text, callback_data=f"vote_{activity_id}")
         await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-        await callback.answer("Голос принят.")
 
 @dp.callback_query(F.data.startswith("dispute_"))
 async def handle_dispute(callback: CallbackQuery):
@@ -445,6 +460,12 @@ async def handle_dispute(callback: CallbackQuery):
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     
+    # We'll answer early to avoid timeout
+    try:
+        await callback.answer("Подпись зафиксирована...")
+    except Exception:
+        pass
+
     dispute = await database.get_dispute_by_activity(activity_id)
     member_count = await bot.get_chat_member_count(chat_id)
     required_to_launch = ((member_count - 1) // 2) + 1
@@ -457,7 +478,7 @@ async def handle_dispute(callback: CallbackQuery):
     signatures_count = await database.add_dispute_signature(dispute_id, user_id)
     
     if signatures_count == -1:
-        await callback.answer("Ты уже подписался на диспут.", show_alert=True)
+        # User already signed. Since we answered already, just return.
         return
         
     if signatures_count >= required_to_launch:
@@ -468,13 +489,17 @@ async def handle_dispute(callback: CallbackQuery):
             is_anonymous=False
         )
         await database.update_dispute_poll(dispute_id, poll_msg.poll.id)
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.answer("Диспут запущен! Голосуйте в опросе.")
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except:
+            pass
     else:
         builder = InlineKeyboardBuilder()
         builder.button(text=f"⚖️ Сбор на диспут ({signatures_count}/{required_to_launch})", callback_data=f"dispute_{activity_id}")
-        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-        await callback.answer("Подпись принята.")
+        try:
+            await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        except:
+            pass
 
 @dp.poll()
 async def handle_poll(poll: types.Poll):
