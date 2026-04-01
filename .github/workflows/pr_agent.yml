@@ -1,44 +1,67 @@
-name: PR Agent
+name: PR AI Agent
 
+# Trigger the workflow when a PR is modified or when a comment is added (for /commands)
 on:
   pull_request:
-     types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
 jobs:
   pr_agent_job:
+    # Ensure this job only runs in the context of a Pull Request, not regular issues
     if: ${{ github.event.issue.pull_request || github.event.pull_request }}
     runs-on: ubuntu-latest
+    
+    # Grant the necessary permissions for the bot to read code and write comments
     permissions:
       issues: write
       pull-requests: write
       contents: read
+      
     steps:
-      # --- Шаг-детектор: проверим, видит ли GitHub твой ключ ---
-      - name: Check Secret
+      # Step 1: Failsafe check to ensure the API key is passed correctly from GitHub Secrets
+      - name: Check API Key Secret
         run: |
-          if [ -z "$TEST_KEY" ]; then
-            echo "❌ ОШИБКА: Ключ ПУСТОЙ! GitHub его не видит. Проверь раздел Repository secrets."
+          if[ -z "$TEST_KEY" ]; then
+            echo "❌ ERROR: GEMINI_API_KEY is empty or missing! Check Repository Secrets."
             exit 1
           else
-            echo "✅ Ключ на месте! Его длина: ${#TEST_KEY} символов."
+            echo "✅ Secret successfully loaded! Length: ${#TEST_KEY} characters."
           fi
         env:
           TEST_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      # --- Сам агент ---
-      - name: PR Agent action
+      # Step 2: Run the Open-Source PR-Agent with custom Greptile-like settings
+      - name: PR Agent Action
         uses: Codium-ai/pr-agent@main
         env:
+          # --- MODEL CONFIGURATION ---
+          # Use your working Gemini 3.1 Pro model
           CONFIG.MODEL: "gemini/gemini-3.1-pro-preview"
-          CONFIG.FALLBACK_MODELS: "['gemini/gemini-3.0-preview']"
+          CONFIG.FALLBACK_MODELS: "['gemini/gemini-1.5-pro']"
           
-          # Передаем ключ в ОБЕ переменные (чтобы ядро агента не ругалось)
+          # Pass the API key to both variables to bypass litellm legacy checks
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_KEY: ${{ secrets.GEMINI_API_KEY }}
-          
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Gemini 3 specific parameters for deep architectural thinking
           LITELLM_PARAMS: "reasoning_effort=high,temperature=1.0"
+          
+          # --- FEATURE: PR DESCRIPTION & DIAGRAMS ---
+          # Automatically summarize the PR and draw a Mermaid.js diagram of the changes
+          github_action_config.auto_describe: "true"
           PR_DESCRIPTION.PUBLISH_DESCRIPTION_AS_COMMENT: "true"
-          PR_REVIEW.REQUIRE_SCORE_REVIEW: "false"
+          PR_DESCRIPTION.ENABLE_PR_DIAGRAM: "true" # <--- Enables automatic architecture graphs!
+          
+          # --- FEATURE: STRICT REVIEW ---
+          # Automatically review the code, score it (0-100), and check for vulnerabilities
+          github_action_config.auto_review: "true"
+          PR_REVIEW.REQUIRE_SCORE_REVIEW: "true"
+          PR_REVIEW.REQUIRE_SECURITY_REVIEW: "true"
+          
+          # --- FEATURE: INLINE IMPROVEMENTS ---
+          # Automatically suggest actionable code fixes inside the GitHub 'Files changed' tab
+          github_action_config.auto_improve: "true"
+          PR_CODE_SUGGESTIONS.NUM_CODE_SUGGESTIONS: 4
