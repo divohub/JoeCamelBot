@@ -69,8 +69,8 @@ async def is_direct_to_bot(message: types.Message):
     if f"@{bot_info.username}" in message.text:
         return True
         
-    # Robust regex for bot keywords anywhere in the message
-    direct_keywords_regex = r"(?i)(бот|бодя|шняга|эй бот|джо|кэмел|верблюд|camel)"
+    # Robust regex for bot keywords anywhere in the message with word boundaries
+    direct_keywords_regex = r"(?i)\b(бот|бодя|шняга|эй бот|джо|кэмел|верблюд|camel)\b"
     if re.search(direct_keywords_regex, message.text):
         return True
         
