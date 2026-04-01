@@ -59,6 +59,81 @@ class AIScorer:
         self.client = genai.Client(api_key=api_key)
         self.model_name = 'gemini-3.1-flash-lite-preview'
 
+    async def generate_audit(self, history, last_audits_str):
+        """
+        Generates an audit message or a random aimless punchline based on chat history.
+        """
+        import random
+        
+        # 10% chance for an aimless throw (just to remind of his presence)
+        if random.random() < 0.10:
+            aimless_prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "напиши одну очень короткую, абсурдную или суровую фразу "
+                "(до 5 слов), чтобы просто напомнить чату о себе. не анализируй события, "
+                "просто брось фразу типа 'вы все рогалики', 'база спит', 'я слежу за вами'. "
+                "ответь просто текстом, без json."
+            )
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=aimless_prompt
+                )
+                return {
+                    "type": "aimless",
+                    "text": response.text.strip()
+                }
+            except Exception as e:
+                logger.error(f"Audit aimless error: {e}")
+                return None
+        
+        # 50% chance for brevity punchline vs 50% normal audit
+        history_str = "\n".join([f"{m['name']}: {m['text']}" for m in history])
+        is_brief = random.random() < 0.50
+        
+        if is_brief:
+            audit_prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "проведи внезапный аудит последних событий в чате. "
+                "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
+                "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
+                "будь КРАЙНЕ краток: выдай ровно одну язвительную или одобряющую фразу-панчлайн в качестве комментария. "
+                "придумай оригинальный короткий заголовок из 2-3 слов (например, 'БАЗА НА СВЯЗИ' или 'АУДИТ РОГАЛИКОВ'). "
+                "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
+                "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
+                f"{last_audits_str}\n\n"
+                "ответь в json: { \"heading\": \"ЗАГОЛОВОК КАПСОМ\", \"comment\": \"одна фраза\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
+            )
+        else:
+            audit_prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "проведи внезапный аудит последних событий в чате. "
+                "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
+                "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
+                "выдай язвительное или одобряющее саммари активной дискуссии. "
+                "придумай оригинальный заголовок для аудита (вместо скучного 'Внезапный аудит'). "
+                "используй наши термины: база, сила, рогалик, анти, блажь. "
+                "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
+                "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
+                f"{last_audits_str}\n\n"
+                "ответь в json: { \"heading\": \"ЗАГОЛОВОК КАПСОМ\", \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
+            )
+            
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=f"{audit_prompt}\n\nСобытия:\n{history_str}",
+                config={'response_mime_type': 'application/json'}
+            )
+            
+            data = json.loads(response.text)
+            logger.info(f"[AUDIT] Heartbeat audit result: {response.text}")
+            data["type"] = "audit"
+            return data
+        except Exception as e:
+            logger.error(f"Audit error: {e}")
+            return None
+
     async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None, reply_to_user=None):
         """
         Analyzes a message with optional context history and user memory.
