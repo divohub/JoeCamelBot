@@ -372,6 +372,7 @@ async def handle_all_messages(message: types.Message):
     elif action == 'remove_points':
         target_user_id = user_id
         is_voting_required = False
+        is_immediate_targeted_fine = False
         
         if target_user_name:
             target_user = await database.find_user_by_name(target_user_name)
@@ -382,6 +383,8 @@ async def handle_all_messages(message: types.Message):
                     # 30% chance of immediate fine without voting
                     if random.random() < 0.30:
                         is_voting_required = False
+                        # Special flag to change the message later
+                        is_immediate_targeted_fine = True
                         logger.info(f"[ACTION] Immediate fine triggered for user {target_user_id} with 30% chance.")
                     else:
                         is_voting_required = True
@@ -395,8 +398,8 @@ async def handle_all_messages(message: types.Message):
 
         if is_voting_required:
             member_count = await bot.get_chat_member_count(chat_id)
-            # Use exactly half of the chat members (rounded down) as the target for the penalty
-            target_votes = max(MIN_VOTES, member_count // 2)
+            # Use exactly half of the chat members (rounded up) as the target for the penalty
+            target_votes = max(MIN_VOTES, (member_count + 1) // 2)
             
             activity_id = await database.add_activity(target_user_id, message.text, -points, "анти", is_mega=False, is_approved=False, target_votes=target_votes)
             
@@ -406,7 +409,7 @@ async def handle_all_messages(message: types.Message):
             text = f"💀 {get_user_mention({'username': username, 'full_name': full_name})} требует наказать {mention} на {points} баллов!\n\n" \
                    f"Причина: {html.italic(html.quote(message.text))}\n\n" \
                    f"Вердикт бота: {html.italic(html.quote(comment))}\n\n" \
-                   f"Пацаны, нужно {html.bold(str(target_votes))} голоса (половина чата), чтобы штраф прошел."
+                   f"Пацаны, нужно {html.bold(str(target_votes))} голоса (ровно половина), чтобы штраф прошел."
 
             await bot.send_message(
                 chat_id=chat_id,
@@ -422,9 +425,16 @@ async def handle_all_messages(message: types.Message):
             builder = InlineKeyboardBuilder()
             builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
             
+            if is_immediate_targeted_fine:
+                header = f"⚡ {html.bold('ВНЕЗАПНАЯ КАРА!')}"
+                body = f"Джо Кэмел не стал ждать пацанов и лично наказал {mention} на {points} баллов силы."
+            else:
+                header = f"💀 {html.bold(f'штраф {points} баллов силы!')}"
+                body = f"({mention})"
+
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"💀 {html.bold(f'штраф {points} баллов силы!')} ({mention})\n\n{html.italic(html.quote(comment))}",
+                text=f"{header}\n{body}\n\n{html.italic(html.quote(comment))}",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
                 **reply_args
