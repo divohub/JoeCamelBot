@@ -69,7 +69,7 @@ class AIScorer:
         self.client = genai.Client(api_key=api_key)
         self.model_name = 'gemini-3.1-flash-lite-preview'
 
-    async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None, reply_to_user=None):
+    async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None, reply_to_user=None, all_users=None):
         """
         Analyzes a message with optional context history and user memory.
         """
@@ -84,8 +84,16 @@ class AIScorer:
             stats_str = f"статистика юзера:\n{user_stats}\n\n" if user_stats else ""
             reply_info = f"это сообщение является ответом пользователю {reply_to_user}.\n" if reply_to_user else ""
             
+            users_list_str = ""
+            if all_users:
+                users_list_str = "ДОСТУПНЫЕ УЧАСТНИКИ (используй эти имена для target_user):\n"
+                for u in all_users:
+                    users_list_str += f"- {u['full_name']} (username: {u['username']})\n"
+                users_list_str += "\n"
+
             prompt_content = (
                 f"{SYSTEM_PROMPT}\n\n"
+                f"{users_list_str}"
                 f"память о юзере ({user_name}):\n{memory_str}\n\n"
                 f"{stats_str}"
                 f"контекст последних сообщений (с индексами):\n{history_str}\n\n"

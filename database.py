@@ -112,6 +112,7 @@ async def get_user(user_id):
             return await cursor.fetchone()
 
 async def update_user(user_id, username, full_name):
+    global _last_cache_update
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO users (user_id, username, full_name) VALUES (?, ?, ?) "
@@ -120,6 +121,8 @@ async def update_user(user_id, username, full_name):
             (user_id, username, full_name)
         )
         await db.commit()
+    # Invalidate cache to reflect changes
+    _last_cache_update = None
 
 async def update_score(user_id, points):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -320,6 +323,13 @@ async def check_audit_cooldown(user_id, hours=3):
 
 
 async def find_user_by_name(name_query):
+    if not name_query:
+        return None
+        
+    name_query = name_query.strip().lstrip('@').lower()
+    if not name_query:
+        return None
+    
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users") as cursor:
@@ -332,20 +342,50 @@ async def find_user_by_name(name_query):
     user_map = {}
     for u in users:
         if u['full_name']:
-            names.append(u['full_name'])
-            user_map[u['full_name']] = u
+            fn = u['full_name'].lower()
+            names.append(fn)
+            user_map[fn] = u
         if u['username']:
-            names.append(u['username'])
-            user_map[u['username']] = u
+            un = u['username'].lower()
+            names.append(un)
+            user_map[un] = u
             
-    matches = difflib.get_close_matches(name_query, names, n=1, cutoff=0.4)
-    if matches:
-        return user_map[matches[0]]
+    # Priority 1: Exact match
+    if name_query in user_map:
+        return user_map[name_query]
         
-    # fallback: substring match
-    name_lower = name_query.lower()
+    # Priority 2: Fuzzy match with RapidFuzz if available, else difflib
+    try:
+        from rapidfuzz import process, fuzz
+        match = process.extractOne(name_query, names, scorer=fuzz.WRatio)
+        if match and match[1] > 80:
+            return user_map[match[0]]
+    except ImportError:
+        matches = difflib.get_close_matches(name_query, names, n=1, cutoff=0.6)
+        if matches:
+            return user_map[matches[0]]
+        
+    # Priority 3: Substring match
     for name in names:
-        if name_lower in name.lower() or name.lower() in name_lower:
+        if name_query in name or name in name_query:
             return user_map[name]
             
     return None
+
+# In-memory cache for users to reduce DB hits and token usage
+_users_cache = []
+_last_cache_update = None
+
+async def get_all_users(force_refresh=False):
+    global _users_cache, _last_cache_update
+    now = datetime.datetime.now()
+    
+    if not force_refresh and _last_cache_update and (now - _last_cache_update).total_seconds() < 300:
+        return _users_cache
+        
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users ORDER BY last_seen DESC LIMIT 100") as cursor:
+            _users_cache = await cursor.fetchall()
+            _last_cache_update = now
+            return _users_cache

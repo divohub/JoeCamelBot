@@ -241,6 +241,8 @@ async def handle_all_messages(message: types.Message):
     if activities:
         user_stats_str += ", последние дела: " + ", ".join([a['description'][:15] for a in activities])
     
+    all_users = await database.get_all_users()
+    
     # Proactive AI check for EVERY message (Lite model makes it cheap)
     ai_result = await scorer.analyze_message(
         message.text, 
@@ -249,7 +251,8 @@ async def handle_all_messages(message: types.Message):
         context_history=history[:-1], 
         is_direct=is_direct,
         user_stats=user_stats_str,
-        reply_to_user=reply_to_user
+        reply_to_user=reply_to_user,
+        all_users=all_users
     )
     
     update_memory = ai_result.get('update_memory')
