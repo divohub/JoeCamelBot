@@ -24,17 +24,20 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 PENALTY_HOUR = int(os.getenv("PENALTY_HOUR", 0))
 PENALTY_MINUTE = int(os.getenv("PENALTY_MINUTE", 0))
 MIN_VOTES = int(os.getenv("MIN_VOTES", 2))
-# Probability to react even if AI said ignore (rare dialogue spice) - not used if we trust AI ignore
-# CHANCE_REACT removed in favor of AI-driven intervention
+# Probability to react even if AI said ignore (rare dialogue spice)
+CHANCE_REACT = float(os.getenv("CHANCE_REACT", 0.05))
 
 # Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialization
+if not BOT_TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN is not set in .env")
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-scorer = AIScorer(GEMINI_KEY)
+scorer = AIScorer(GEMINI_KEY or "")
 scheduler = AsyncIOScheduler()
 bot_info = None
 
@@ -45,10 +48,10 @@ MAX_HISTORY = 15
 
 # Helper to format message with user mention
 def get_user_mention(user):
-    username = user['username'] if 'username' in user.keys() else None
+    username = user.get('username')
     if username:
         return f"@{html.quote(username)}"
-    full_name = user['full_name'] if 'full_name' in user.keys() else 'Неизвестный'
+    full_name = user.get('full_name', 'Неизвестный')
     return html.quote(full_name)
 
 # Filter to check if the bot is mentioned or replied to
@@ -60,18 +63,19 @@ async def is_direct_to_bot(message: types.Message):
     if message.chat.type == "private":
         return True
     
-    if not message.text:
+    msg_text = message.text or ""
+    if not msg_text:
         return False
         
-    if message.reply_to_message and message.reply_to_message.from_user.id == bot.id:
+    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot.id:
         return True
         
-    if f"@{bot_info.username}" in message.text:
+    if bot_info.username and f"@{bot_info.username}" in msg_text:
         return True
         
     # Robust regex for bot keywords anywhere in the message with word boundaries
     direct_keywords_regex = r"(?i)\b(бот|бодя|шняга|эй бот|джо|кэмел|верблюд|camel)\b"
-    if re.search(direct_keywords_regex, message.text):
+    if re.search(direct_keywords_regex, msg_text):
         return True
         
     return False
@@ -283,7 +287,24 @@ async def handle_all_messages(message: types.Message):
             if not comment:
                 comment = "че тебе надо? формулируй мысль как пацан, а не рогалик."
         else:
-            return
+            # Chance to override ignore with a cynical random reaction
+            # Base chance + weight by message length (more to talk about)
+            # Maximum override chance of 25%
+            override_chance = min(CHANCE_REACT + (len(message.text or "") / 500), 0.25)
+            if random.random() < override_chance:
+                logger.info(f"[ACTION] Overriding 'ignore' with chance {override_chance:.2f} for user {full_name}")
+                # We need a comment if we override. We'll ask AI again but force it to respond?
+                # Or just let it be. Actually, if we override 'ignore', we should have requested 'chat' from the start.
+                # Let's change the logic: we'll set is_direct to True if we want to force a reaction? No.
+                # Let's just use the comment that AI *might* have provided anyway.
+                if comment:
+                    action = 'chat'
+                else:
+                    # If AI didn't provide a comment, it really meant to ignore.
+                    # We could try to generate one, but it's better to just skip if it's truly empty.
+                    return
+            else:
+                return
             
     if not comment and action != 'ignore':
         if is_direct:
@@ -613,8 +634,8 @@ async def main():
     # Daily penalty at 00:00
     scheduler.add_job(daily_penalty, CronTrigger(hour=PENALTY_HOUR, minute=PENALTY_MINUTE))
     
-    # Heartbeat audit every 4 hours
-    scheduler.add_job(heartbeat_audit, IntervalTrigger(hours=4))
+    # Heartbeat audit every 2 hours
+    scheduler.add_job(heartbeat_audit, IntervalTrigger(hours=2))
     
     scheduler.start()
     await dp.start_polling(bot)
