@@ -125,13 +125,13 @@ class AIScorer:
         """
         Generates an audit message or a random aimless punchline based on chat history.
         """
-        # 10% chance for an aimless throw
-        if random.random() < 0.10:
+        # 20% chance for an aimless throw (organic presence)
+        if random.random() < 0.20:
             aimless_prompt = (
                 f"{SYSTEM_PROMPT}\n\n"
                 "напиши одну очень короткую, абсурдную или суровую фразу "
                 "(до 5 слов), чтобы просто напомнить чату о себе. не анализируй события, "
-                "просто брось фразу типа 'вы все рогалики', 'база спит', 'я слежу за вами'. "
+                "просто брось фразу в стиле Джо Кэмела (база, рогалик, курение, цинизм). "
                 "ответь просто текстом, без json."
             )
             try:
