@@ -51,20 +51,24 @@ def get_user_mention(user):
     if not user:
         return "Неизвестный"
         
-    # sqlite3.Row does not support .get(), so we use dict-like access or check keys
-    try:
-        username = user['username']
-    except (KeyError, TypeError, IndexError):
-        username = None
-        
+    # Support both object attributes (aiogram User) and dict-like access (sqlite3.Row/dict)
+    username = getattr(user, 'username', None)
+    if not username:
+        try:
+            username = user['username']
+        except (KeyError, TypeError, IndexError):
+            username = None
+            
     if username:
         return f"@{html.quote(username)}"
         
-    try:
-        full_name = user['full_name']
-    except (KeyError, TypeError, IndexError):
-        full_name = "Неизвестный"
-        
+    full_name = getattr(user, 'full_name', None)
+    if not full_name:
+        try:
+            full_name = user['full_name']
+        except (KeyError, TypeError, IndexError):
+            full_name = "Неизвестный"
+            
     return html.quote(full_name)
 
 # Filter to check if the bot is mentioned or replied to
