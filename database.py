@@ -112,6 +112,7 @@ async def get_user(user_id):
             return await cursor.fetchone()
 
 async def update_user(user_id, username, full_name):
+    global _last_cache_update
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO users (user_id, username, full_name) VALUES (?, ?, ?) "
@@ -120,6 +121,8 @@ async def update_user(user_id, username, full_name):
             (user_id, username, full_name)
         )
         await db.commit()
+    # Invalidate cache to reflect changes
+    _last_cache_update = None
 
 async def update_score(user_id, points):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -367,8 +370,20 @@ async def find_user_by_name(name_query):
             
     return None
 
-async def get_all_users():
+# In-memory cache for users to reduce DB hits and token usage
+_users_cache = []
+_last_cache_update = None
+
+async def get_all_users(force_refresh=False):
+    global _users_cache, _last_cache_update
+    now = datetime.datetime.now()
+    
+    if not force_refresh and _last_cache_update and (now - _last_cache_update).total_seconds() < 300:
+        return _users_cache
+        
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM users") as cursor:
-            return await cursor.fetchall()
+        async with db.execute("SELECT * FROM users ORDER BY last_seen DESC LIMIT 100") as cursor:
+            _users_cache = await cursor.fetchall()
+            _last_cache_update = now
+            return _users_cache
