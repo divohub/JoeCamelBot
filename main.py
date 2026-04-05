@@ -379,7 +379,12 @@ async def handle_all_messages(message: types.Message):
                 target_user_id = target_user['user_id']
                 mention = get_user_mention(target_user)
                 if target_user_id != user_id:
-                    is_voting_required = True
+                    # 30% chance of immediate fine without voting
+                    if random.random() < 0.30:
+                        is_voting_required = False
+                        logger.info(f"[ACTION] Immediate fine triggered for user {target_user_id} with 30% chance.")
+                    else:
+                        is_voting_required = True
             else:
                 await bot.send_message(
                     chat_id=chat_id,
@@ -390,7 +395,8 @@ async def handle_all_messages(message: types.Message):
 
         if is_voting_required:
             member_count = await bot.get_chat_member_count(chat_id)
-            target_votes = (member_count // 2) + 1
+            # Use exactly half of the chat members (rounded down) as the target for the penalty
+            target_votes = max(MIN_VOTES, member_count // 2)
             
             activity_id = await database.add_activity(target_user_id, message.text, -points, "анти", is_mega=False, is_approved=False, target_votes=target_votes)
             
@@ -400,7 +406,7 @@ async def handle_all_messages(message: types.Message):
             text = f"💀 {get_user_mention({'username': username, 'full_name': full_name})} требует наказать {mention} на {points} баллов!\n\n" \
                    f"Причина: {html.italic(html.quote(message.text))}\n\n" \
                    f"Вердикт бота: {html.italic(html.quote(comment))}\n\n" \
-                   f"Пацаны, нужно {html.bold(str(target_votes))} голоса (большинство), чтобы штраф прошел."
+                   f"Пацаны, нужно {html.bold(str(target_votes))} голоса (половина чата), чтобы штраф прошел."
 
             await bot.send_message(
                 chat_id=chat_id,
