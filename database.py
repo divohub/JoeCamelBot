@@ -327,6 +327,8 @@ async def find_user_by_name(name_query):
         return None
         
     name_query = name_query.strip().lstrip('@').lower()
+    if not name_query:
+        return None
     
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
