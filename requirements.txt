@@ -3,3 +3,4 @@ google-genai
 apscheduler
 aiosqlite
 python-dotenv
+rapidfuzz

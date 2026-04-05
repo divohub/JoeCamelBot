@@ -320,6 +320,11 @@ async def check_audit_cooldown(user_id, hours=3):
 
 
 async def find_user_by_name(name_query):
+    if not name_query:
+        return None
+        
+    name_query = name_query.strip().lstrip('@').lower()
+    
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users") as cursor:
@@ -332,20 +337,38 @@ async def find_user_by_name(name_query):
     user_map = {}
     for u in users:
         if u['full_name']:
-            names.append(u['full_name'])
-            user_map[u['full_name']] = u
+            fn = u['full_name'].lower()
+            names.append(fn)
+            user_map[fn] = u
         if u['username']:
-            names.append(u['username'])
-            user_map[u['username']] = u
+            un = u['username'].lower()
+            names.append(un)
+            user_map[un] = u
             
-    matches = difflib.get_close_matches(name_query, names, n=1, cutoff=0.4)
-    if matches:
-        return user_map[matches[0]]
+    # Priority 1: Exact match
+    if name_query in user_map:
+        return user_map[name_query]
         
-    # fallback: substring match
-    name_lower = name_query.lower()
+    # Priority 2: Fuzzy match with RapidFuzz if available, else difflib
+    try:
+        from rapidfuzz import process, fuzz
+        match = process.extractOne(name_query, names, scorer=fuzz.WRatio)
+        if match and match[1] > 80:
+            return user_map[match[0]]
+    except ImportError:
+        matches = difflib.get_close_matches(name_query, names, n=1, cutoff=0.6)
+        if matches:
+            return user_map[matches[0]]
+        
+    # Priority 3: Substring match
     for name in names:
-        if name_lower in name.lower() or name.lower() in name_lower:
+        if name_query in name or name in name_query:
             return user_map[name]
             
     return None
+
+async def get_all_users():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users") as cursor:
+            return await cursor.fetchall()
