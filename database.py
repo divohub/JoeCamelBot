@@ -187,8 +187,10 @@ async def add_vote(activity_id, voter_id):
             await db.execute("INSERT INTO votes (activity_id, voter_id) VALUES (?, ?)", (activity_id, voter_id))
             await db.commit()
             async with db.execute("SELECT COUNT(*) FROM votes WHERE activity_id = ?", (activity_id,)) as cursor:
-                count = (await cursor.fetchone())[0]
-                return count
+                row = await cursor.fetchone()
+                if row:
+                    return row[0]
+                return 0
         except aiosqlite.IntegrityError:
             return -1
 
@@ -253,8 +255,10 @@ async def add_dispute_signature(dispute_id, user_id):
             await db.execute("INSERT INTO dispute_signatures (dispute_id, user_id) VALUES (?, ?)", (dispute_id, user_id))
             await db.commit()
             async with db.execute("SELECT COUNT(*) FROM dispute_signatures WHERE dispute_id = ?", (dispute_id,)) as cursor:
-                count = (await cursor.fetchone())[0]
-                return count
+                row = await cursor.fetchone()
+                if row:
+                    return row[0]
+                return 0
         except aiosqlite.IntegrityError:
             return -1
 
