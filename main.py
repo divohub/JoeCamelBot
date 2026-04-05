@@ -317,6 +317,7 @@ async def handle_all_messages(message: types.Message):
     if action == 'add_points':
         target_user_id = user_id
         is_voting_required = is_mega
+        is_immediate_targeted_reward = False
         
         if target_user_name:
             target_user = await database.find_user_by_name(target_user_name)
@@ -324,7 +325,13 @@ async def handle_all_messages(message: types.Message):
                 target_user_id = target_user['user_id']
                 mention = get_user_mention(target_user)
                 if target_user_id != user_id:
-                    is_voting_required = True
+                    # 30% chance of immediate reward without voting
+                    if random.random() < 0.30:
+                        is_voting_required = False
+                        is_immediate_targeted_reward = True
+                        logger.info(f"[ACTION] Immediate reward triggered for user {target_user_id} with 30% chance.")
+                    else:
+                        is_voting_required = True
             else:
                 await bot.send_message(
                     chat_id=chat_id,
@@ -334,19 +341,23 @@ async def handle_all_messages(message: types.Message):
                 return
 
         if is_voting_required:
-            activity_id = await database.add_activity(target_user_id, message.text, points, category, is_mega=True, is_approved=False, target_votes=MIN_VOTES)
+            member_count = await bot.get_chat_member_count(chat_id)
+            # Use half of the chat members (rounded up) as the target, or MIN_VOTES
+            target_votes = max(MIN_VOTES, (member_count + 1) // 2)
+            
+            activity_id = await database.add_activity(target_user_id, message.text, points, category, is_mega=True, is_approved=False, target_votes=target_votes)
             builder = InlineKeyboardBuilder()
-            builder.button(text=f"✅ База (0/{MIN_VOTES})", callback_data=f"vote_{activity_id}")
+            builder.button(text=f"✅ База (0/{target_votes})", callback_data=f"vote_{activity_id}")
             
             if target_user_id != user_id:
                 text = f"🔥 {mention} реально титан. Пацаны, +{points} за базу?\n\n" \
                        f"Запрос от {get_user_mention({'username': username, 'full_name': full_name})}: {html.italic(html.quote(message.text))}\n\n" \
                        f"Вердикт бота: {html.italic(html.quote(comment))}\n\n" \
-                       f"Нужно {html.bold(str(MIN_VOTES))} голоса!"
+                       f"Нужно {html.bold(str(target_votes))} голоса (ровно половина)!"
             else:
                 text = f"🔥 {html.bold('ИСТИННАЯ СИЛА ОБНАРУЖЕНА!')} 🔥\n\n{mention} утверждает: {html.italic(html.quote(message.text))}\n\n" \
                        f"Вердикт бота: {html.italic(html.quote(comment))}\n\n" \
-                       f"Пацаны, нужно {html.bold(str(MIN_VOTES))} голоса, чтобы вписать это в историю (+{points} баллов)!"
+                       f"Пацаны, нужно {html.bold(str(target_votes))} голоса (ровно половина), чтобы вписать это в историю (+{points} баллов)!"
 
             await bot.send_message(
                 chat_id=chat_id,
@@ -362,9 +373,16 @@ async def handle_all_messages(message: types.Message):
             builder = InlineKeyboardBuilder()
             builder.button(text=f"⚖️ Оспорить (0)", callback_data=f"dispute_{activity_id}")
             
+            if is_immediate_targeted_reward:
+                header = f"💎 {html.bold('ЩЕДРОСТЬ БЕЗ ГРАНИЦ!')}"
+                body = f"Джо Кэмел сегодня добрый. Он сразу вписал {mention} в базу на {points} баллов силы."
+            else:
+                header = f"💎 {html.bold(f'база пополнена на {points} баллов!')}"
+                body = f"({mention})\nразряд: {html.quote(category)}"
+
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"💎 {html.bold(f'база пополнена на {points} баллов!')} ({mention})\nразряд: {html.quote(category)}\n\n{html.italic(html.quote(comment))}",
+                text=f"{header}\n{body}\n\n{html.italic(html.quote(comment))}",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
                 **reply_args
