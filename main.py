@@ -290,7 +290,7 @@ async def handle_all_messages(message: types.Message):
             # Chance to override ignore with a cynical random reaction
             # Base chance + weight by message length (more to talk about)
             # Maximum override chance of 25%
-            override_chance = min(CHANCE_REACT + (len(message.text) / 500), 0.25)
+            override_chance = min(CHANCE_REACT + (len(message.text or "") / 500), 0.25)
             if random.random() < override_chance:
                 logger.info(f"[ACTION] Overriding 'ignore' with chance {override_chance:.2f} for user {full_name}")
                 # We need a comment if we override. We'll ask AI again but force it to respond?
