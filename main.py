@@ -48,10 +48,23 @@ MAX_HISTORY = 15
 
 # Helper to format message with user mention
 def get_user_mention(user):
-    username = user.get('username')
+    if not user:
+        return "Неизвестный"
+        
+    # sqlite3.Row does not support .get(), so we use dict-like access or check keys
+    try:
+        username = user['username']
+    except (KeyError, TypeError, IndexError):
+        username = None
+        
     if username:
         return f"@{html.quote(username)}"
-    full_name = user.get('full_name', 'Неизвестный')
+        
+    try:
+        full_name = user['full_name']
+    except (KeyError, TypeError, IndexError):
+        full_name = "Неизвестный"
+        
     return html.quote(full_name)
 
 # Filter to check if the bot is mentioned or replied to
