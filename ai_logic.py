@@ -2,6 +2,7 @@ from google import genai
 import os
 import json
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ SYSTEM_PROMPT = """
 - не будь предсказуемым. если скучно — молчи. если есть повод — врывайся.
 - проактивность: если ты не упомянут напрямую, ты можешь иногда просто бросить абсурдную фразу или шутку (action "chat"), чтобы поддержать атмосферу, даже без начисления баллов. Но не спамь, вмешивайся уместно. Иначе выбирай action "ignore".
 - при оценке шняги используй термины: база, сила, рогалик, анти, блажь.
-- галлюцинации недопустимы: определяй "ядро" текущей дискуссии и комментируй только тех, кто реально в ней участвует. не упоминай людей, которые просто висят в истории сообщений, но не активны сейчас.
+- галлюцинации недопустимы: определяй "ядро" текущей дискуссии и комментируй только тех, кто реально участвует в ней. не упоминай людей, которые просто висят в истории сообщений, но не активны сейчас.
 - фокус: в диалогах концентрируйся на текущем авторе и том, кому он отвечает. не вплетай левых людей из истории, если они не при делах.
 - НЕ упоминай текущий счет юзера и его баллы в своих ответах, держи это в тайне, пусть сами проверяют через команды.
 - если тебя спрашивают "что думаешь?", "как тебе?" или просто просят мнение, давай циничный или абсурдный комментарий (action "chat"), НЕ привязывая его обязательно к баллам или правилам шняги.
@@ -68,85 +69,6 @@ class AIScorer:
         self.client = genai.Client(api_key=api_key)
         self.model_name = 'gemini-3.1-flash-lite-preview'
 
-    async def generate_audit(self, history, last_audits_str):
-        """
-        Generates an audit message or a random aimless punchline based on chat history.
-        """
-        import random
-        
-        # 10% chance for an aimless throw (just to remind of his presence)
-        if random.random() < 0.10:
-            aimless_prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
-                "напиши одну очень короткую, абсурдную или суровую фразу "
-                "(до 5 слов), чтобы просто напомнить чату о себе. не анализируй события, "
-                "просто брось фразу типа 'вы все рогалики', 'база спит', 'я слежу за вами'. "
-                "ответь просто текстом, без json."
-            )
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=aimless_prompt
-                )
-                return {
-                    "type": "aimless",
-                    "text": response.text.strip()
-                }
-            except Exception as e:
-                logger.error(f"Audit aimless error: {e}")
-                return None
-        
-        # 50% chance for brevity punchline vs 50% normal audit
-        history_str = ""
-        for m in history:
-            reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
-            history_str += f"{m['name']}{reply_info}: {m['text']}\n"
-
-        is_brief = random.random() < 0.50
-        
-        if is_brief:
-            audit_prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
-                "проведи внезапный аудит последних событий в чате. "
-                "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
-                "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
-                "будь КРАЙНЕ краток: выдай ровно одну язвительную или одобряющую фразу-панчлайн в качестве комментария. "
-                "придумай оригинальный короткий заголовок из 2-3 слов (например, 'БАЗА НА СВЯЗИ' или 'АУДИТ РОГАЛИКОВ'). "
-                "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
-                "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
-                f"{last_audits_str}\n\n"
-                "ответь в json: { \"heading\": \"ЗАГОЛОВОК КАПСОМ\", \"comment\": \"одна фраза\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
-            )
-        else:
-            audit_prompt = (
-                f"{SYSTEM_PROMPT}\n\n"
-                "проведи внезапный аудит последних событий в чате. "
-                "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
-                "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
-                "выдай язвительное или одобряющее саммари активной дискуссии. "
-                "придумай оригинальный заголовок для аудита (вместо скучного 'Внезапный аудит'). "
-                "используй наши термины: база, сила, рогалик, анти, блажь. "
-                "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
-                "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
-                f"{last_audits_str}\n\n"
-                "ответь в json: { \"heading\": \"ЗАГОЛОВОК КАПСОМ\", \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
-            )
-            
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=f"{audit_prompt}\n\nСобытия:\n{history_str}",
-                config={'response_mime_type': 'application/json'}
-            )
-            
-            data = json.loads(response.text)
-            logger.info(f"[AUDIT] Heartbeat audit result: {response.text}")
-            data["type"] = "audit"
-            return data
-        except Exception as e:
-            logger.error(f"Audit error: {e}")
-            return None
-
     async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None, reply_to_user=None):
         """
         Analyzes a message with optional context history and user memory.
@@ -180,8 +102,10 @@ class AIScorer:
                 }
             )
             
+            if not response or not hasattr(response, 'text') or response.text is None:
+                raise ValueError("Empty or None response from Gemini")
+            
             data = json.loads(response.text)
-            # [LOGGING] Log raw AI response for transparency
             logger.info(f"[AI DECISION] Raw response from Gemini: {response.text}")
             return data
         except Exception as e:
@@ -197,38 +121,66 @@ class AIScorer:
                 }
             return {"action": "ignore"}
 
-    async def analyze_audit(self, history, last_audits_str):
+    async def generate_audit(self, history, last_audits_str):
         """
-        Conducts a sudden audit of the chat history.
+        Generates an audit message or a random aimless punchline based on chat history.
         """
-        try:
-            audit_prompt = (
-                "ты — джо кэмел. проведи внезапный аудит последних событий в чате. "
-                "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
-                "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
-                "выдай язвительное или одобряющее саммари активной дискуссии. "
-                "используй наши термины: база, сила, рогалик, анти, блажь. "
-                "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
-                "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
-                f"{last_audits_str}\n\n"
-                "ответь в json: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
+        # 10% chance for an aimless throw
+        if random.random() < 0.10:
+            aimless_prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "напиши одну очень короткую, абсурдную или суровую фразу "
+                "(до 5 слов), чтобы просто напомнить чату о себе. не анализируй события, "
+                "просто брось фразу типа 'вы все рогалики', 'база спит', 'я слежу за вами'. "
+                "ответь просто текстом, без json."
             )
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=aimless_prompt
+                )
+                if response and response.text:
+                    return {
+                        "type": "aimless",
+                        "comment": response.text.strip()
+                    }
+                return None
+            except Exception as e:
+                logger.error(f"Audit aimless error: {e}")
+                return None
+        
+        history_str = ""
+        for m in history:
+            reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
+            history_str += f"{m['name']}{reply_info}: {m['text']}\n"
+
+        audit_prompt = (
+            f"{SYSTEM_PROMPT}\n\n"
+            "проведи внезапный аудит последних событий в чате. "
+            "ВНИМАНИЕ: определи 'ядро' текущей дискуссии и комментируй ТОЛЬКО тех, кто реально участвует в ней. "
+            "Не упоминай и не выдумывай действия тех, кто просто висит в буфере истории. "
+            "выдай язвительное или одобряющее саммари активной дискуссии. "
+            "используй наши термины: база, сила, рогалик, анти, блажь. "
+            "можешь раздать небольшие бонусы (+5) или штрафы (-5) за поведение активных участников. "
+            "ВНИМАНИЕ: Вот твои предыдущие вердикты, чтобы ты не повторялся и не штрафовал за одно и то же:\n"
+            f"{last_audits_str}\n\n"
+            "ответь в json: { \"comment\": \"текст\", \"awards\": [{ \"user_name\": \"имя\", \"points\": число }] }"
+        )
             
-            history_str = ""
-            for m in history:
-                reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
-                history_str += f"{m['name']}{reply_info}: {m['text']}\n"
-            
+        try:
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=f"{audit_prompt}\n\nСобытия:\n{history_str}",
                 config={'response_mime_type': 'application/json'}
             )
             
+            if not response or not hasattr(response, 'text') or response.text is None:
+                raise ValueError("Empty or None response from Gemini during audit")
+                
             data = json.loads(response.text)
-            # [LOGGING] Audit Trace
             logger.info(f"[AUDIT] Heartbeat audit result: {response.text}")
+            data["type"] = "audit"
             return data
         except Exception as e:
-            logger.error(f"Audit analysis error: {e}")
+            logger.error(f"Audit error: {e}")
             return None
