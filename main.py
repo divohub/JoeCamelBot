@@ -292,7 +292,6 @@ async def handle_all_messages(message: types.Message):
     category = ai_result.get('category', 'Диалог')
     comment = ai_result.get('comment', '')
     is_mega = ai_result.get('is_mega', False) or category == 'Мега'
-    reply_to_idx = ai_result.get('reply_to_idx')
     target_user_name = ai_result.get('target_user')
 
     reply_args = {}
@@ -301,22 +300,8 @@ async def handle_all_messages(message: types.Message):
     if message.message_thread_id:
         reply_args['message_thread_id'] = message.message_thread_id
 
-    # For points transactions, ALWAYS reply to the command that triggered them to avoid confusion
-    if action in ['add_points', 'remove_points']:
-        reply_args['reply_to_message_id'] = message.message_id
-    else:
-        if reply_to_idx is not None and isinstance(reply_to_idx, int):
-            if reply_to_idx == -1:
-                pass # Aimless throw, do not set reply_to_message_id (but keeps message_thread_id)
-            else:
-                ctx_history = history[:-1]
-                if 0 <= reply_to_idx < len(ctx_history):
-                    reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
-                else:
-                    reply_args['reply_to_message_id'] = message.message_id
-        else:
-            # Default behavior: reply to the current message
-            reply_args['reply_to_message_id'] = message.message_id
+    # ALWAYS reply to the message that triggered the bot's action. No more guessing reply indexes.
+    reply_args['reply_to_message_id'] = message.message_id
 
     # [LOGGING] AI Decision Trace
     logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}', target: {target_user_name}")
