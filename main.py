@@ -211,7 +211,7 @@ async def cmd_set_chat(message: types.Message):
 @dp.message(Command("setspam"))
 async def cmd_set_spam(message: types.Message):
     # Check if admin
-    admin_id = int(os.getenv("ADMIN_ID", 0))
+    admin_id = int(os.getenv("ADMIN_ID") or 0)
     if admin_id and message.from_user.id != admin_id:
         # Fallback to chat admin check if global admin isn't set/matching
         user_status = await bot.get_chat_member(message.chat.id, message.from_user.id)
