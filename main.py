@@ -204,7 +204,12 @@ async def handle_stats_pagination(callback: CallbackQuery):
 
 @dp.message(Command("setchat"))
 async def cmd_set_chat(message: types.Message):
-    await database.set_setting("main_chat_id", message.chat.id)
+    user_status = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    if user_status.status not in ['administrator', 'creator']:
+        await message.answer("Только админ может решать, где мне сидеть.")
+        return
+        
+    await database.set_setting("main_chat_id", str(message.chat.id))
     await message.answer(f"✅ Чат признан ареной силы (ID: {message.chat.id}). Сюда будут приходить отчеты.")
 
 # Main logic: Handle all messages
@@ -220,6 +225,15 @@ async def handle_all_messages(message: types.Message):
     
     await database.update_user(user_id, username, full_name)
     
+    # Access Control: in groups, only listen to registered users or admins
+    if message.chat.type in ['group', 'supergroup']:
+        user_in_db = await database.get_user(user_id)
+        if not user_in_db:
+            member = await bot.get_chat_member(chat_id, user_id)
+            if member.status not in ['administrator', 'creator']:
+                logger.info(f"Ignoring message from non-admin, non-registered user {user_id} in group {chat_id}")
+                return
+
     # Maintain chat history
     if chat_id not in CHAT_HISTORY:
         CHAT_HISTORY[chat_id] = []
