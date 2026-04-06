@@ -87,7 +87,7 @@ async def is_direct_to_bot(message: types.Message):
     if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot.id:
         return True
         
-    if bot_info.username and f"@{bot_info.username}" in msg_text:
+    if bot_info.username and f"@{bot_info.username.lower()}" in msg_text.lower():
         return True
         
     # Robust regex for bot keywords anywhere in the message with word boundaries
@@ -322,16 +322,12 @@ async def handle_all_messages(message: types.Message):
             override_chance = min(CHANCE_REACT + (len(message.text or "") / 500), 0.25)
             if random.random() < override_chance:
                 logger.info(f"[ACTION] Overriding 'ignore' with chance {override_chance:.2f} for user {full_name}")
-                # We need a comment if we override. We'll ask AI again but force it to respond?
-                # Or just let it be. Actually, if we override 'ignore', we should have requested 'chat' from the start.
-                # Let's change the logic: we'll set is_direct to True if we want to force a reaction? No.
-                # Let's just use the comment that AI *might* have provided anyway.
                 if comment:
                     action = 'chat'
                 else:
-                    # If AI didn't provide a comment, it really meant to ignore.
-                    # We could try to generate one, but it's better to just skip if it's truly empty.
-                    return
+                    # If AI completely ignored the prompt to leave a thought, fallback to catchphrase
+                    action = 'chat'
+                    comment = random.choice(["даб даб", "даб даб я", "база", "че за блажь?"])
             else:
                 return
             
