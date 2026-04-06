@@ -71,7 +71,7 @@ class AIScorer:
         self.client = genai.Client(api_key=api_key)
         self.model_name = 'gemini-3.1-flash-lite-preview'
 
-    async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None, reply_to_user=None, all_users=None):
+    async def analyze_message(self, message_text, user_name, user_memory=None, context_history=None, is_direct=False, user_stats=None, reply_to_user=None, all_users=None, replied_message_text=None):
         """
         Analyzes a message with optional context history and user memory.
         """
@@ -79,12 +79,18 @@ class AIScorer:
             history_str = ""
             if context_history:
                 for i, m in enumerate(context_history):
-                    reply_info = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
-                    history_str += f"[{i}] {m['name']}{reply_info}: {m['text']}\n"
+                    reply_info_hist = f" (в ответ {m['reply_to_name']})" if m.get('reply_to_name') else ""
+                    history_str += f"[{i}] {m['name']}{reply_info_hist}: {m['text']}\n"
             
             memory_str = user_memory if user_memory else "информации пока нет."
             stats_str = f"статистика юзера:\n{user_stats}\n\n" if user_stats else ""
-            reply_info = f"это сообщение является ответом пользователю {reply_to_user}.\n" if reply_to_user else ""
+            
+            reply_info = ""
+            if reply_to_user:
+                reply_info = f"это сообщение является ответом (реплаем) пользователю {reply_to_user}.\n"
+                if replied_message_text:
+                    reply_info += f"ТЕКСТ ОРИГИНАЛЬНОГО СООБЩЕНИЯ (от {reply_to_user}): «{replied_message_text}»\n"
+                    reply_info += "ВНИМАНИЕ: Если тебя просят оценить это сообщение или выдать баллы, ты должен оценивать ИМЕННО ЭТОТ ОРИГИНАЛЬНЫЙ ТЕКСТ и (если нужно) выдавать баллы или штрафы ЕГО АВТОРУ, указав его в поле target_user!\n"
             
             users_list_str = ""
             if all_users:
