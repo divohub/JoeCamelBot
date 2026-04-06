@@ -285,18 +285,27 @@ async def handle_all_messages(message: types.Message):
     target_user_name = ai_result.get('target_user')
 
     reply_args = {}
-    if reply_to_idx is not None and isinstance(reply_to_idx, int):
-        if reply_to_idx == -1:
-            pass # Explicitly do not reply to any message
-        else:
-            ctx_history = history[:-1]
-            if 0 <= reply_to_idx < len(ctx_history):
-                reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
-            else:
-                reply_args['reply_to_message_id'] = message.message_id
-    else:
-        # Default behavior: reply to the current message
+    
+    # Always include message_thread_id to ensure replies stay in the correct Telegram topic
+    if message.message_thread_id:
+        reply_args['message_thread_id'] = message.message_thread_id
+
+    # For points transactions, ALWAYS reply to the command that triggered them to avoid confusion
+    if action in ['add_points', 'remove_points']:
         reply_args['reply_to_message_id'] = message.message_id
+    else:
+        if reply_to_idx is not None and isinstance(reply_to_idx, int):
+            if reply_to_idx == -1:
+                pass # Aimless throw, do not set reply_to_message_id (but keeps message_thread_id)
+            else:
+                ctx_history = history[:-1]
+                if 0 <= reply_to_idx < len(ctx_history):
+                    reply_args['reply_to_message_id'] = ctx_history[reply_to_idx]['message_id']
+                else:
+                    reply_args['reply_to_message_id'] = message.message_id
+        else:
+            # Default behavior: reply to the current message
+            reply_args['reply_to_message_id'] = message.message_id
 
     # [LOGGING] AI Decision Trace
     logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}', target: {target_user_name}")
