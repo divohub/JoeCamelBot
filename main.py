@@ -45,6 +45,7 @@ bot_info = None
 # Each message: {"name": str, "text": str, "timestamp": datetime}
 CHAT_HISTORY = {}
 MAX_HISTORY = 15
+PROACTIVE_COOLDOWNS = {} # {chat_id: datetime}
 
 # Helper to format message with user mention
 def get_user_mention(user):
@@ -212,6 +213,33 @@ async def cmd_set_chat(message: types.Message):
     await database.set_setting("main_chat_id", str(message.chat.id))
     await message.answer(f"✅ Чат признан ареной силы (ID: {message.chat.id}). Сюда будут приходить отчеты.")
 
+@dp.message(Command("setspam"))
+async def cmd_set_spam(message: types.Message):
+    # Check if admin
+    admin_id = int(os.getenv("ADMIN_ID") or 0)
+    if admin_id and message.from_user.id != admin_id:
+        # Fallback to chat admin check if global admin isn't set/matching
+        user_status = await bot.get_chat_member(message.chat.id, message.from_user.id)
+        if user_status.status not in ['administrator', 'creator']:
+            await message.answer("Эта команда только для админов, рогалик.")
+            return
+
+    args = message.text.split()
+    if len(args) != 3:
+        await message.answer("Использование: /setspam <шанс_от_0_до_100> <кулдаун_в_минутах>\nПример (шанс 5%, ждать 10 минут): /setspam 5 10")
+        return
+        
+    try:
+        chance = float(args[1]) / 100.0
+        cooldown = int(args[2])
+        
+        await database.set_setting(f"chance_react_{message.chat.id}", chance)
+        await database.set_setting(f"cooldown_{message.chat.id}", cooldown)
+        
+        await message.answer(f"✅ Настройки спама обновлены!\nШанс внезапного ответа: {chance*100}%\nКулдаун (ждать пока чат не замолчит): {cooldown} минут.")
+    except ValueError:
+        await message.answer("Неверный формат чисел. Пиши просто числа.")
+
 # Main logic: Handle all messages
 @dp.message(F.text)
 async def handle_all_messages(message: types.Message):
@@ -261,11 +289,25 @@ async def handle_all_messages(message: types.Message):
 
     is_direct = await is_direct_to_bot(message)
     
+    chat_chance_str = await database.get_setting(f"chance_react_{chat_id}", str(CHANCE_REACT))
+    chat_chance = float(chat_chance_str) if chat_chance_str else CHANCE_REACT
+    chat_cooldown_str = await database.get_setting(f"cooldown_{chat_id}", "5")
+    chat_cooldown = int(chat_cooldown_str) if chat_cooldown_str else 5
+    
     if not is_direct:
-        # Save tokens and prevent spam: only call AI ~10-15% of the time for non-direct messages
-        wake_chance = min(CHANCE_REACT + (len(message.text or "") / 800), 0.15)
+        now = datetime.now()
+        last_proactive = PROACTIVE_COOLDOWNS.get(chat_id)
+        if last_proactive and (now - last_proactive).total_seconds() < chat_cooldown * 60:
+            return
+            
+        # Save tokens and prevent spam: only call AI if it passes the base chance check
+        # We divide length by 1500 to make the message length bonus smaller, keeping the average chance low
+        wake_chance = min(chat_chance + (len(message.text or "") / 1500), chat_chance * 2)
         if random.random() > wake_chance:
             return
+            
+        # If it passed the chance, update the cooldown immediately so it doesn't spam in bursts
+        PROACTIVE_COOLDOWNS[chat_id] = now
 
     # [LOGGING] Inbound message details
     logger.info(f"[INBOUND] User ID: {user_id}, Name: {full_name}, Text: {message.text}, is_direct: {is_direct}")
@@ -317,6 +359,10 @@ async def handle_all_messages(message: types.Message):
     # ALWAYS reply to the message that triggered the bot's action. No more guessing reply indexes.
     reply_args['reply_to_message_id'] = message.message_id
 
+    # Update cooldown again just to be safe if AI takes a while to respond
+    if not is_direct:
+        PROACTIVE_COOLDOWNS[chat_id] = datetime.now()
+
     # [LOGGING] AI Decision Trace
     logger.info(f"[ACTION] Taking action '{action}' for user {full_name} (ID: {user_id}) in category '{category}', target: {target_user_name}")
 
@@ -327,17 +373,13 @@ async def handle_all_messages(message: types.Message):
                 comment = "че тебе надо? формулируй мысль как пацан, а не рогалик."
         else:
             # We already passed the wake_chance gate to even call the AI.
-            # If the AI still wants to ignore, we have a smaller chance to force it to chat with its internal thought.
-            override_chance = min(CHANCE_REACT + (len(message.text or "") / 500), 0.25)
-            if random.random() < override_chance:
-                logger.info(f"[ACTION] Overriding 'ignore' with chance {override_chance:.2f} for user {full_name}")
-                if comment:
-                    action = 'chat'
-                else:
-                    action = 'chat'
-                    comment = random.choice(["даб даб", "даб даб я", "база", "че за блажь?"])
+            # If the AI still wants to ignore, we force it to chat with its internal thought.
+            logger.info(f"[ACTION] AI ignored but passed proactive check, forcing chat for user {full_name}")
+            if comment:
+                action = 'chat'
             else:
-                return
+                action = 'chat'
+                comment = random.choice(["даб даб", "даб даб я", "база", "че за блажь?"])
             
     if not comment and action != 'ignore':
         if is_direct:
