@@ -261,8 +261,8 @@ async def handle_all_messages(message: types.Message):
     all_users = await database.get_all_users()
     
     replied_message_text = None
-    if message.reply_to_message and message.reply_to_message.text:
-        replied_message_text = message.reply_to_message.text
+    if message.reply_to_message:
+        replied_message_text = message.reply_to_message.text or message.reply_to_message.caption
     
     # Proactive AI check for EVERY message (Lite model makes it cheap)
     ai_result = await scorer.analyze_message(
