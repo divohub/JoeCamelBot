@@ -260,6 +260,10 @@ async def handle_all_messages(message: types.Message):
     
     all_users = await database.get_all_users()
     
+    replied_message_text = None
+    if message.reply_to_message:
+        replied_message_text = message.reply_to_message.text or message.reply_to_message.caption
+    
     # Proactive AI check for EVERY message (Lite model makes it cheap)
     ai_result = await scorer.analyze_message(
         message.text, 
@@ -269,7 +273,8 @@ async def handle_all_messages(message: types.Message):
         is_direct=is_direct,
         user_stats=user_stats_str,
         reply_to_user=reply_to_user,
-        all_users=all_users
+        all_users=all_users,
+        replied_message_text=replied_message_text
     )
     
     update_memory = ai_result.get('update_memory')
