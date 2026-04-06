@@ -247,6 +247,12 @@ async def handle_all_messages(message: types.Message):
 
     is_direct = await is_direct_to_bot(message)
     
+    if not is_direct:
+        # Save tokens and prevent spam: only call AI ~10-15% of the time for non-direct messages
+        wake_chance = min(CHANCE_REACT + (len(message.text or "") / 800), 0.15)
+        if random.random() > wake_chance:
+            return
+
     # [LOGGING] Inbound message details
     logger.info(f"[INBOUND] User ID: {user_id}, Name: {full_name}, Text: {message.text}, is_direct: {is_direct}")
     
@@ -321,16 +327,14 @@ async def handle_all_messages(message: types.Message):
             if not comment:
                 comment = "че тебе надо? формулируй мысль как пацан, а не рогалик."
         else:
-            # Chance to override ignore with a cynical random reaction
-            # Base chance + weight by message length (more to talk about)
-            # Maximum override chance of 25%
+            # We already passed the wake_chance gate to even call the AI.
+            # If the AI still wants to ignore, we have a smaller chance to force it to chat with its internal thought.
             override_chance = min(CHANCE_REACT + (len(message.text or "") / 500), 0.25)
             if random.random() < override_chance:
                 logger.info(f"[ACTION] Overriding 'ignore' with chance {override_chance:.2f} for user {full_name}")
                 if comment:
                     action = 'chat'
                 else:
-                    # If AI completely ignored the prompt to leave a thought, fallback to catchphrase
                     action = 'chat'
                     comment = random.choice(["даб даб", "даб даб я", "база", "че за блажь?"])
             else:
